@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import discord
 from discord import app_commands
 from discord.ext import commands
+from google import genai
 
 # 1. Configuration des Intents
 intents = discord.Intents.default()
@@ -17,12 +18,17 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # ID DU SERVEUR CENTRAL
 CENTRAL_GUILD_ID = 1568910819008323594
 
+# Initialisation du client Gemini AI
+# (Récupère automatiquement la clé depuis la variable d'environnement GEMINI_API_KEY)
+ai_client = genai.Client()
+
 # Structures de suivi en mémoire
 raid_tracker = {}     # {guild_id: [timestamps]}
 channel_tracker = {}  # {guild_id: [timestamps]}
 paused_tickets = set()
 blocked_users = set()
 locked_down_servers = set()
+ai_handled_tickets = set() # Pour savoir si l'IA gère le ticket ou si un humain a repris
 
 # =========================================================================
 # 📜 FONCTION D'AUTO-MISE À JOUR DU SALON COMMANDES
@@ -42,12 +48,17 @@ async def update_help_channel():
         help_channel = await central_guild.create_text_channel(name="📜-commandes-bot", category=cat_gestion)
         print("✅ Salon #📜-commandes-bot créé.")
 
-    # Construction du message récapitulatif
     embed = discord.Embed(
         title="📚 DOCUMENTATION AUTOMATIQUE — COMMANDES & ACTIONS DU BOT",
         description="Ce salon est mis à jour automatiquement par le bot à chaque mise à jour ou ajout de fonctionnalités.",
         color=discord.Color.gold(),
         timestamp=datetime.now()
+    )
+
+    embed.add_field(
+        name="🤖 SUPPORT INTELLIGENT (IA GEMINI)",
+        value="• **Réponse Automatique par IA** : Les tickets MP reçoivent une analyse et une réponse intelligente propulsée par Gemini 24h/24, tant qu'un administrateur n'a pas pris le relais manuellement.",
+        inline=False
     )
 
     embed.add_field(
@@ -71,7 +82,7 @@ async def update_help_channel():
     embed.add_field(
         name="📩 GESTION DES TICKETS MP (Boutons sous l'Embed)",
         value=(
-            "• `⏸️ Pause / Reprendre` : Met en pause le ticket ou le réactive (prévient l'utilisateur en MP).\n"
+            "• `⏸️ Pause / Reprendre` : Met en pause le ticket ou le réactive.\n"
             "• `🔒 Fermer` : Ferme et supprime le salon de ticket central après notification au membre.\n"
             "• `🚫 Bloquer` : Bloque l'utilisateur du système de support et détruit le salon."
         ),
@@ -88,16 +99,14 @@ async def update_help_channel():
         inline=False
     )
 
-    embed.set_footer(text="Système de documentation dynamique • Prochaine MAJ au prochain redémarrage")
+    embed.set_footer(text="Système de documentation dynamique • Propulsé par Gemini AI")
 
-    # Recherche si le message existe déjà pour le mettre à jour
     async for message in help_channel.history(limit=10):
         if message.author == bot.user and message.embeds:
             await message.edit(embed=embed)
             print("✅ Salon #📜-commandes-bot mis à jour avec succès.")
             return
 
-    # Si aucun message trouvé, on l'envoie pour la première fois
     await help_channel.send(embed=embed)
     print("✅ Documentation envoyée dans #📜-commandes-bot.")
 
@@ -126,12 +135,11 @@ async def on_ready():
             }
             await central_guild.create_category(name="📩 ── [ TICKETS MP ] ──", overwrites=overwrites)
 
-        # Auto-génération et mise à jour de la documentation
         await update_help_channel()
 
     try:
         synced = await bot.tree.sync()
-        print(f"🔗 {len(synced)} commande(s) slash synchronisée(s).")
+        print(f"🔗 {len(synced)} commande(s) synchronisée(s).")
     except Exception as e:
         print(f"❌ Erreur de synchronisation : {e}")
 
@@ -237,6 +245,8 @@ class TicketControlView(discord.ui.View):
 
         if interaction.channel.id in paused_tickets:
             paused_tickets.remove(interaction.channel.id)
+        if interaction.channel.id in ai_handled_tickets:
+            ai_handled_tickets.remove(interaction.channel.id)
 
         await interaction.response.send_message("🔒 Fermeture du ticket dans 5 secondes...")
         await asyncio.sleep(5)
@@ -252,12 +262,15 @@ class TicketControlView(discord.ui.View):
                 try: await user.send("🚫 Vous avez été bloqué du système de support.")
                 except Exception: pass
 
+        if interaction.channel.id in ai_handled_tickets:
+            ai_handled_tickets.remove(interaction.channel.id)
+
         await interaction.response.send_message("🚫 Utilisateur bloqué. Fermeture du salon dans 5 secondes...")
         await asyncio.sleep(5)
         await interaction.channel.delete()
 
 # =========================================================================
-# 📩 GESTION DES MP (TICKETS, SALUTATIONS ET DÉCONFINEMENT STAFF)
+# 📩 GESTION DES MP (TICKETS, SUPPORT IA & DÉCONFINEMENT STAFF)
 # =========================================================================
 
 @bot.event
@@ -318,12 +331,13 @@ async def on_message(message):
                 category=cat_ticket,
                 topic=f"ID_USER:{message.author.id}"
             )
+            ai_handled_tickets.add(ticket_channel.id) # Active l'IA par défaut sur le nouveau ticket
             
             embed_welcome = discord.Embed(
                 title=f"📩 Nouveau Ticket MP ouvert — {message.author}",
                 description=f"**Utilisateur :** {message.author.mention} (`{message.author.id}`)\n\n"
-                            f"⚙️ **Actions rapides :** Utilisez les boutons ci-dessous pour gérer ce ticket.\n"
-                            f"💡 *Pour lever un confinement par MP, envoyez : `unlock ID_DU_SERVEUR`*",
+                            f"🤖 **Support IA Actif** (Gemini gère les réponses automatiques jusqu'à intervention d'un admin).\n"
+                            f"⚙️ **Actions rapides :** Utilisez les boutons ci-dessous.",
                 color=discord.Color.blue()
             )
             embed_welcome.set_thumbnail(url=message.author.display_avatar.url)
@@ -333,28 +347,45 @@ async def on_message(message):
             await message.channel.send("⏸️ Votre ticket est actuellement en pause.")
             return
 
-        greetings = ["bonjour", "salut", "hello", "hey", "bonsoir", "yo", "coucou"]
-        if is_new_ticket or any(word in content_clean.split() for word in greetings):
-            embed_auto = discord.Embed(
-                title="👋 Bonjour !",
-                description="Bonjour ! Que puis-je faire pour vous ? Votre message a été transmis à l'équipe d'administration.",
-                color=discord.Color.blue()
-            )
-            embed_auto.set_footer(text="🤖 Message automatique du Bot")
-            await message.channel.send(embed=embed_auto)
-        else:
-            embed_ack = discord.Embed(
-                description="✅ Votre message a bien été transmis à l'équipe d'administration.",
-                color=discord.Color.light_grey()
-            )
-            embed_ack.set_footer(text="🤖 Système de transmission")
-            await message.channel.send(embed=embed_ack)
-
+        # Transmission de la question dans le salon central
         embed_msg = discord.Embed(description=message.content, color=discord.Color.light_grey(), timestamp=datetime.now())
         embed_msg.set_author(name=f"{message.author} (MP)", icon_url=message.author.display_avatar.url)
         if message.attachments:
             embed_msg.set_image(url=message.attachments[0].url)
         await ticket_channel.send(embed=embed_msg)
+
+        # Réponse automatique via l'IA Gemini si aucun humain n'a pris le relais
+        if ticket_channel.id in ai_handled_tickets:
+            try:
+                # Utilisation du modèle gemini-2.5-flash (rapide et parfait pour le support)
+                prompt_system = (
+                    "Tu es l'assistant virtuel officiel d'une administration centralisée de serveurs Discord. "
+                    "Tu réponds aux utilisateurs en MP de manière polie, claire, professionnelle et rassurante. "
+                    "Précise-leur que leur message a bien été transmis aux administrateurs humains et réponds à leur question s'ils en ont une."
+                )
+                response = ai_client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=f"{prompt_system}\n\nMessage de l'utilisateur : {message.content}"
+                )
+                ai_reply_text = response.text
+
+                embed_ai = discord.Embed(
+                    title="🤖 Assistant Virtuel (IA)",
+                    description=ai_reply_text,
+                    color=discord.Color.blue(),
+                    timestamp=datetime.now()
+                )
+                embed_ai.set_footer(text="🤖 Réponse automatique générée par Gemini AI")
+                await message.channel.send(embed=embed_ai)
+
+                # Copie de la réponse de l'IA dans le salon central pour traçabilité
+                embed_log_ai = discord.Embed(description=ai_reply_text, color=discord.Color.blue(), timestamp=datetime.now())
+                embed_log_ai.set_author(name="Bot (Réponse IA)", icon_url=bot.user.display_avatar.url)
+                await ticket_channel.send(embed=embed_log_ai)
+
+            except Exception as e:
+                print(f"Erreur IA Gemini : {e}")
+                await message.channel.send("✅ Votre message a bien été transmis à l'équipe d'administration.")
 
     # 2. Réponse de la Centrale vers l'utilisateur en MP
     elif message.guild and message.guild.id == CENTRAL_GUILD_ID:
@@ -364,6 +395,11 @@ async def on_message(message):
                 return
             if message.channel.id in paused_tickets:
                 return
+
+            # Dès qu'un administrateur humain écrit dans le salon, on désactive l'IA pour ce ticket
+            if message.channel.id in ai_handled_tickets:
+                ai_handled_tickets.remove(message.channel.id)
+                await message.channel.send("🛡️ *[Mode IA désactivé : un administrateur a pris le relais en manuel]*")
 
             if message.channel.topic and "ID_USER:" in message.channel.topic:
                 user_id = int(message.channel.topic.split("ID_USER:")[1].strip())
@@ -534,7 +570,7 @@ async def stats_reseau(interaction: discord.Interaction):
 
     embed_stats = discord.Embed(
         title="📊 STATISTIQUES GLOBALES DU RÉSEAU",
-        description="Vue d'ensemble de l'infrastucture sous le contrôle du bot master.",
+        description="Vue d'ensemble de l'infrastructure sous le contrôle du bot master.",
         color=discord.Color.blue(),
         timestamp=datetime.now()
     )
