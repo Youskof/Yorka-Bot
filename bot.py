@@ -24,13 +24,89 @@ paused_tickets = set()
 blocked_users = set()
 locked_down_servers = set()
 
+# =========================================================================
+# 📜 FONCTION D'AUTO-MISE À JOUR DU SALON COMMANDES
+# =========================================================================
+
+async def update_help_channel():
+    central_guild = bot.get_guild(CENTRAL_GUILD_ID)
+    if not central_guild:
+        return
+
+    cat_gestion = discord.utils.get(central_guild.categories, name="⚙️ ── [ GESTION DU BOT ] ──")
+    if not cat_gestion:
+        return
+
+    help_channel = discord.utils.get(cat_gestion.text_channels, name="📜-commandes-bot")
+    if not help_channel:
+        help_channel = await central_guild.create_text_channel(name="📜-commandes-bot", category=cat_gestion)
+        print("✅ Salon #📜-commandes-bot créé.")
+
+    # Construction du message récapitulatif
+    embed = discord.Embed(
+        title="📚 DOCUMENTATION AUTOMATIQUE — COMMANDES & ACTIONS DU BOT",
+        description="Ce salon est mis à jour automatiquement par le bot à chaque mise à jour ou ajout de fonctionnalités.",
+        color=discord.Color.gold(),
+        timestamp=datetime.now()
+    )
+
+    embed.add_field(
+        name="🔨 MODÉRATION GLOBALE (Slash Commands)",
+        value=(
+            "• `/global-ban user_id:<ID> raison:<motif>` : Bannit l'utilisateur de **tous** les serveurs du réseau d'un coup + envoie un MP à la cible et trace l'action dans `#🔨-sanctions-globales`.\n"
+            "• `/global-kick user_id:<ID> raison:<motif>` : Expulse l'utilisateur de **tous** les serveurs du réseau + notification MP et log."
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="📊 GESTION & INFRASTRUCTURE (Slash Commands)",
+        value=(
+            "• `/stats-reseau` : Affiche les statistiques en direct du réseau (nombre de serveurs, membres cumulés, salons surveillés, confinements actifs).\n"
+            "• `/diffuser titre:<titre> message:<texte>` : Diffuse une annonce officielle stylisée dans le salon principal de **tous** les serveurs clients."
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="📩 GESTION DES TICKETS MP (Boutons sous l'Embed)",
+        value=(
+            "• `⏸️ Pause / Reprendre` : Met en pause le ticket ou le réactive (prévient l'utilisateur en MP).\n"
+            "• `🔒 Fermer` : Ferme et supprime le salon de ticket central après notification au membre.\n"
+            "• `🚫 Bloquer` : Bloque l'utilisateur du système de support et détruit le salon."
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="🚨 SÉCURITÉ & PROTOCOLE ANTI-RAID",
+        value=(
+            "• **Détection automatique** : Surveillance des pings de masse, vagues d'arrivées et suppressions de salons.\n"
+            "• **Confinement d'Urgence** : Bouton rouge interactif dans `#🚨-erreurs-globales` pour verrouiller le serveur ciblé et faire une annonce `@everyone`.\n"
+            "• **Levée du confinement** : Un administrateur peut lever le confinement à tout moment en envoyant en MP au bot : `unlock <ID_DU_SERVEUR>`."
+        ),
+        inline=False
+    )
+
+    embed.set_footer(text="Système de documentation dynamique • Prochaine MAJ au prochain redémarrage")
+
+    # Recherche si le message existe déjà pour le mettre à jour
+    async for message in help_channel.history(limit=10):
+        if message.author == bot.user and message.embeds:
+            await message.edit(embed=embed)
+            print("✅ Salon #📜-commandes-bot mis à jour avec succès.")
+            return
+
+    # Si aucun message trouvé, on l'envoie pour la première fois
+    await help_channel.send(embed=embed)
+    print("✅ Documentation envoyée dans #📜-commandes-bot.")
+
 @bot.event
 async def on_ready():
     print(f"✅ Bot connecté en tant que {bot.user.name} (ID: {bot.user.id})")
     
     central_guild = bot.get_guild(CENTRAL_GUILD_ID)
     if central_guild:
-        # Catégorie de gestion globale
         cat_gestion = discord.utils.get(central_guild.categories, name="⚙️ ── [ GESTION DU BOT ] ──")
         if not cat_gestion:
             overwrites = {
@@ -42,7 +118,6 @@ async def on_ready():
             await central_guild.create_text_channel(name="🚨-erreurs-globales", category=cat_gestion)
             await central_guild.create_text_channel(name="🔨-sanctions-globales", category=cat_gestion)
 
-        # Catégorie des tickets MP
         cat_ticket = discord.utils.get(central_guild.categories, name="📩 ── [ TICKETS MP ] ──")
         if not cat_ticket:
             overwrites = {
@@ -50,6 +125,9 @@ async def on_ready():
                 central_guild.me: discord.PermissionOverwrite(read_messages=True)
             }
             await central_guild.create_category(name="📩 ── [ TICKETS MP ] ──", overwrites=overwrites)
+
+        # Auto-génération et mise à jour de la documentation
+        await update_help_channel()
 
     try:
         synced = await bot.tree.sync()
@@ -316,7 +394,6 @@ async def on_message(message):
 # ⚙️ COMMANDES SLASH DE MODÉRATION ET D'ADMINISTRATION GLOBALE
 # =========================================================================
 
-# 1. BANNISSEMENT GLOBAL SUR TOUS LES SERVEURS
 @bot.tree.command(name="global-ban", description="Bannit un utilisateur de TOUS les serveurs du réseau avec notification MP.")
 @app_commands.describe(user_id="ID de l'utilisateur à bannir", raison="Raison du bannissement global")
 async def global_ban(interaction: discord.Interaction, user_id: str, raison: str):
@@ -332,7 +409,6 @@ async def global_ban(interaction: discord.Interaction, user_id: str, raison: str
         await interaction.followup.send("❌ Utilisateur introuvable.")
         return
 
-    # Notification MP préalable à l'utilisateur
     mp_status = "Envoyé avec succès"
     try:
         embed_mp = discord.Embed(
@@ -360,7 +436,6 @@ async def global_ban(interaction: discord.Interaction, user_id: str, raison: str
         except Exception:
             failed_guilds.append(guild.name)
 
-    # Log d'audit écrit sur la centrale
     central_guild = bot.get_guild(CENTRAL_GUILD_ID)
     if central_guild:
         for ch in central_guild.text_channels:
@@ -382,7 +457,6 @@ async def global_ban(interaction: discord.Interaction, user_id: str, raison: str
 
     await interaction.followup.send(f"✅ Bannissement global exécuté pour **{user_to_ban}**. (`{len(banned_guilds)}` serveurs affectés)")
 
-# 2. EXPULSION GLOBALE SUR TOUS LES SERVEURS
 @bot.tree.command(name="global-kick", description="Expulse un utilisateur de TOUS les serveurs du réseau avec notification MP.")
 @app_commands.describe(user_id="ID de l'utilisateur à expulser", raison="Raison de l'expulsion globale")
 async def global_kick(interaction: discord.Interaction, user_id: str, raison: str):
@@ -448,14 +522,13 @@ async def global_kick(interaction: discord.Interaction, user_id: str, raison: st
 
     await interaction.followup.send(f"✅ Expulsion globale exécutée pour **{user_to_kick}**. (`{len(kicked_guilds)}` serveurs affectés)")
 
-# 3. STATISTIQUES GLOBALES DU RÉSEAU
 @bot.tree.command(name="stats-reseau", description="Affiche l'état global et les statistiques de l'infrastructure.")
 async def stats_reseau(interaction: discord.Interaction):
     if interaction.guild_id != CENTRAL_GUILD_ID:
         await interaction.response.send_message("❌ Cette commande est réservée au serveur central.", ephemeral=True)
         return
 
-    total_guilds = len(bot.guilds) - 1 # Exclusion du serveur central
+    total_guilds = len(bot.guilds) - 1
     total_members = sum(g.member_count for g in bot.guilds if g.id != CENTRAL_GUILD_ID)
     total_channels = sum(len(g.channels) for g in bot.guilds if g.id != CENTRAL_GUILD_ID)
 
@@ -475,7 +548,6 @@ async def stats_reseau(interaction: discord.Interaction):
 
     await interaction.response.send_message(embed=embed_stats)
 
-# 4. DIFFUSION D'ANNONCES GROUPÉES
 @bot.tree.command(name="diffuser", description="Diffuse un message officiel sur tous les serveurs clients.")
 @app_commands.describe(titre="Titre de l'annonce", message="Contenu de l'annonce")
 async def diffuser(interaction: discord.Interaction, titre: str, message: str):
