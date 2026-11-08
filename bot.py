@@ -434,7 +434,8 @@ async def on_message(message):
     # 2. Réponse de la Centrale vers l'utilisateur en MP
     elif message.guild and message.guild.id == CENTRAL_GUILD_ID:
         if message.channel.category and message.channel.category.name == "📩 ── [ TICKETS MP ] ──":
-            if message.content.startswith("/") or message.content.startswith("!"):
+            # Si c'est une commande texte classique commençant par '!'
+            if message.content.startswith("!"):
                 await bot.process_commands(message)
                 return
             if message.channel.id in paused_tickets:
@@ -470,7 +471,9 @@ async def on_message(message):
                 except Exception as e:
                     await message.channel.send(f"❌ Erreur lors de l'envoi du MP : `{e}`")
 
-    await bot.process_commands(message)
+    # Ne traite les commandes textuelles que si elles commencent par '!' pour éviter les erreurs sur les Slash Commands
+    if message.content.startswith("!"):
+        await bot.process_commands(message)
 
 # =========================================================================
 # ⚙️ COMMANDES SLASH (PROPOSER IDÉE IA & MODÉRATION/ADMINISTRATION)
@@ -873,7 +876,7 @@ async def on_member_remove(member):
 @bot.event
 async def on_guild_channel_create(channel):
     embed = discord.Embed(title="📂 Salon Créé", description=f"**#{channel.name}** créé.", color=discord.Color.blue())
-    await send_central_log(member.guild.id if hasattr(channel, 'guild') else channel.guild.id, "salons", embed)
+    await send_central_log(channel.guild.id, "salons", embed)
 
 @bot.event
 async def on_member_ban(guild, user):
