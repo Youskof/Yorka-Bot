@@ -30,6 +30,75 @@ locked_down_servers = set()
 ai_handled_tickets = set()
 
 # =========================================================================
+# 🏛️ MODÈLES DE STRUCTURES DE SERVEURS (TEMPLATES)
+# =========================================================================
+
+TEMPLATES = {
+    "police": [
+        {
+            "category": "╔═══════〔 🏛️ ACCUEIL 〕═══════╗",
+            "text": ["📢・annonces", "📜・règlement", "📋・informations", "🏅・grades-et-hiérarchie", "🪪・demande-de-matricule", "📅・événements", "🚀・boost-du-serveur"],
+            "voice": []
+        },
+        {
+            "category": "╔═══════〔 👥 COMMUNAUTÉ 〕═══════╗",
+            "text": ["💬・discussion-générale", "📸・galerie-photos", "🎥・vidéos", "🤖・commandes-bots"],
+            "voice": ["🔊・vocal-général", "🔊・vocal-détente"]
+        },
+        {
+            "category": "╔═══════〔 🎓 RECRUTEMENT & FORMATION 〕═══════╗",
+            "text": ["📢・annonces-recrutement", "📝・candidatures", "📂・suivi-des-candidatures", "📋・examens-et-évaluations", "🎓・formations", "📊・résultats-formations"],
+            "voice": ["🔊・vocal-formation"]
+        },
+        {
+            "category": "╔═══════〔 🗂️ ADMINISTRATION 〕═══════╗",
+            "text": ["📢・annonces-internes", "👮・effectifs", "🏅・promotions", "📉・rétrogradations", "📋・demandes-de-grade", "📅・gestion-des-absences", "🔄・prise-et-fin-de-service", "📡・codes-radio", "🛠️・organisation-des-services"],
+            "voice": []
+        },
+        {
+            "category": "╔═══════〔 ⚖️ PLAINTES & RÉCLAMATIONS 〕═══════╗",
+            "text": ["📨・déposer-une-plainte", "📂・plaintes-en-cours", "📋・plaintes-traitées", "⚖️・décisions-administratives", "📁・archives-des-plaintes"],
+            "voice": []
+        },
+        {
+            "category": "╔═══════〔 📑 RAPPORTS ADMINISTRATIFS 〕═══════╗",
+            "text": ["🚨・rapports-d-arrestation", "🚔・rapports-d-intervention", "🔎・rapports-d-enquête", "📋・rapports-de-patrouille", "⚠️・signalements-internes", "📁・archives-des-rapports"],
+            "voice": []
+        },
+        {
+            "category": "╔═══════〔 👮 POLICE NATIONALE 〕═══════╗",
+            "text": ["📢・annonces-police", "💬・discussion-police", "🚨・rapports-arrestation", "🚔・rapports-intervention", "📋・rapports-patrouille", "📸・médias-police", "📡・communication-police"],
+            "voice": ["🔊・vocal-police", "🔊・vocal-patrouille"]
+        },
+        {
+            "category": "╔═══════〔 🏎️ BRIGADE MOTORISÉE 〕═══════╗",
+            "text": ["📢・annonces-bmo", "💬・discussion-bmo", "🚨・rapports-arrestation", "🚔・rapports-intervention", "🏍️・rapports-patrouille", "📸・médias-bmo", "📡・communication-bmo"],
+            "voice": ["🔊・vocal-bmo"]
+        },
+        {
+            "category": "╔═══════〔 🛡️ BRIGADE ANTI-CRIMINALITÉ 〕═══════╗",
+            "text": ["📢・annonces-bac", "💬・discussion-bac", "🚨・rapports-arrestation", "🚔・rapports-intervention", "🔎・rapports-d-enquête", "📸・médias-bac", "📡・communication-bac"],
+            "voice": ["🔊・vocal-bac"]
+        },
+        {
+            "category": "╔═══════〔 👑 COMMANDEMENT 〕═══════╗",
+            "text": ["📢・annonces-commandement", "💬・discussion-commandement", "📊・gestion-des-effectifs", "📋・demandes-de-sanctions", "⚖️・décisions-disciplinaires", "🏅・validations-des-promotions", "📁・dossiers-confidentiels"],
+            "voice": ["🔊・réunion-commandement", "🔊・vocal-hauts-gradés"]
+        },
+        {
+            "category": "╔═══════〔 ⚖️ DISCIPLINE & CONTRÔLE 〕═══════╗",
+            "text": ["📨・signalement-agent", "📋・dossiers-disciplinaires", "⚠️・sanctions-prononcées", "🔎・contrôle-des-rapports", "📁・archives-disciplinaires"],
+            "voice": []
+        },
+        {
+            "category": "╔═══════〔 🎫 SUPPORT 〕═══════╗",
+            "text": ["🎫・ouvrir-un-ticket", "📋・suivi-des-demandes"],
+            "voice": ["🔊・vocal-assistance"]
+        }
+    ]
+}
+
+# =========================================================================
 # 💡 VUE INTERACTIVE DES SUGGESTIONS IA (Accepter / Refuser / Personnaliser)
 # =========================================================================
 
@@ -80,17 +149,14 @@ async def setup_central_channels():
     if not cat_gestion:
         return
 
-    # Salon Documentation
     help_channel = discord.utils.get(cat_gestion.text_channels, name="📜-commandes-bot")
     if not help_channel:
         help_channel = await central_guild.create_text_channel(name="📜-commandes-bot", category=cat_gestion)
 
-    # Salon Suggestions IA
     suggest_channel = discord.utils.get(cat_gestion.text_channels, name="💡-suggestions-ia")
     if not suggest_channel:
         suggest_channel = await central_guild.create_text_channel(name="💡-suggestions-ia", category=cat_gestion)
 
-    # Mise à jour du salon documentation
     embed_help = discord.Embed(
         title="📚 DOCUMENTATION AUTOMATIQUE — COMMANDES & ACTIONS DU BOT",
         description="Ce salon est mis à jour automatiquement par le bot à chaque mise à jour ou ajout de fonctionnalités.",
@@ -104,6 +170,12 @@ async def setup_central_channels():
             "• **Support MP** : Gemini répond automatiquement aux membres 24h/24 tant qu'un admin n'a pas pris le relais.\n"
             "• **Suggestions IA (`/proposer-idee`)** : L'IA formule des propositions d'améliorations dans `#💡-suggestions-ia` interactives avec boutons."
         ),
+        inline=False
+    )
+
+    embed_help.add_field(
+        name="🏗️ DEPLOIEMENT DE STRUCTURES (Slash Commands)",
+        value="• `/deploy-template server_id:<ID> model:<police>` : Reconstruit intégralement la structure des salons d'un serveur.",
         inline=False
     )
 
@@ -176,7 +248,6 @@ async def on_ready():
 
         await setup_central_channels()
 
-    # Synchronisation unique et propre uniquement sur le serveur central
     try:
         guild_obj = discord.Object(id=CENTRAL_GUILD_ID)
         synced_guild = await bot.tree.sync(guild=guild_obj)
@@ -322,11 +393,9 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    # 1. Réception d'un MP d'un utilisateur
     if isinstance(message.channel, discord.DMChannel):
         content_clean = message.content.strip().lower()
 
-        # Commande staff pour lever le confinement via MP : "unlock ID"
         if "unlock" in content_clean or "lever" in content_clean:
             import re
             numbers = re.findall(r'\d{17,20}', message.content)
@@ -395,7 +464,6 @@ async def on_message(message):
             embed_msg.set_image(url=message.attachments[0].url)
         await ticket_channel.send(embed=embed_msg)
 
-        # Réponse IA Gemini (Exécution asynchrone sécurisée avec boucle anti-503)
         if ticket_channel.id in ai_handled_tickets:
             try:
                 prompt_system = (
@@ -448,7 +516,6 @@ async def on_message(message):
                 embed_fallback.set_footer(text="🤖 Système de transmission")
                 await message.channel.send(embed=embed_fallback)
 
-    # 2. Réponse de la Centrale vers l'utilisateur en MP
     elif message.guild and message.guild.id == CENTRAL_GUILD_ID:
         if message.channel.category and message.channel.category.name == "📩 ── [ TICKETS MP ] ──":
             if message.content.startswith("!"):
@@ -491,8 +558,93 @@ async def on_message(message):
         await bot.process_commands(message)
 
 # =========================================================================
-# ⚙️ COMMANDES SLASH (PROPOSER IDÉE IA & MODÉRATION/ADMINISTRATION)
+# ⚙️ COMMANDES SLASH (PROPOSER IDÉE, DÉPLOIEMENT & ADMINISTRATION)
 # =========================================================================
+
+@bot.tree.command(name="deploy-template", description="Reconstruit intégralement les salons d'un serveur client selon un modèle préconfiguré.")
+@app_commands.describe(server_id="ID du serveur à restructurer", model="Modèle de structure à appliquer (ex: police)")
+@app_commands.choices(model=[
+    app_commands.Choice(name="Police Nationale / Gendarmerie (RP)", value="police")
+])
+async def deploy_template(interaction: discord.Interaction, server_id: str, model: app_commands.Choice[str]):
+    if interaction.guild_id != CENTRAL_GUILD_ID:
+        await interaction.response.send_message("❌ Réservé au serveur central.", ephemeral=True)
+        return
+
+    await interaction.response.defer()
+
+    try:
+        target_guild_id = int(server_id)
+    except ValueError:
+        await interaction.followup.send("❌ L'ID de serveur fourni n'est pas valide.")
+        return
+
+    target_guild = bot.get_guild(target_guild_id)
+    if not target_guild:
+        await interaction.followup.send(f"❌ Impossible de trouver un serveur avec l'ID `{server_id}` (le bot y est-il présent ?).")
+        return
+
+    template_data = TEMPLATES.get(model.value)
+    if not template_data:
+        await interaction.followup.send("❌ Modèle introuvable.")
+        return
+
+    await interaction.followup.send(f"⏳ **Début du remplacement de structure sur {target_guild.name}...**\nSuppression des anciens salons et création du modèle `{model.name}`.")
+
+    # 1. Suppression de l'ancienne structure (Salons et Catégories)
+    for channel in target_guild.channels:
+        try:
+            await channel.delete(reason=f"[RECONSTRUCTION] Déploiement du modèle {model.name} par {interaction.user}")
+            await asyncio.sleep(0.3)
+        except Exception as e:
+            print(f"Échec suppression salon {channel.name}: {e}")
+
+    # 2. Création de la nouvelle structure
+    created_categories = 0
+    created_channels = 0
+
+    for cat_info in template_data:
+        try:
+            category = await target_guild.create_category(name=cat_info["category"])
+            created_categories += 1
+            await asyncio.sleep(0.3)
+
+            for text_name in cat_info["text"]:
+                await target_guild.create_text_channel(name=text_name, category=category)
+                created_channels += 1
+                await asyncio.sleep(0.3)
+
+            for voice_name in cat_info["voice"]:
+                await target_guild.create_voice_channel(name=voice_name, category=category)
+                created_channels += 1
+                await asyncio.sleep(0.3)
+
+        except Exception as e:
+            print(f"Erreur création catégorie/salon: {e}")
+
+    # 3. Notification finale sur la centrale
+    central_guild = bot.get_guild(CENTRAL_GUILD_ID)
+    if central_guild:
+        for ch in central_guild.text_channels:
+            if "statut-global" in ch.name:
+                embed_log = discord.Embed(
+                    title="🏗️ RECONSTRUCTION DE SERVEUR EFFECTUÉE",
+                    description=f"La structure du serveur **{target_guild.name}** (`{target_guild.id}`) a été réinitialisée et reconstruite.",
+                    color=discord.Color.purple(),
+                    timestamp=datetime.now()
+                )
+                embed_log.add_field(name="📋 Modèle appliqué", value=model.name, inline=True)
+                embed_log.add_field(name="📂 Catégories créées", value=str(created_categories), inline=True)
+                embed_log.add_field(name="💬/🔊 Salons créés", value=str(created_channels), inline=True)
+                embed_log.set_footer(text=f"Opérateur : {interaction.user.name}")
+                await ch.send(embed=embed_log)
+                break
+
+    await interaction.followup.send(
+        f"✅ **Reconstruction terminée avec succès sur {target_guild.name} !**\n"
+        f"• `{created_categories}` catégories créées\n"
+        f"• `{created_channels}` salons (textuels et vocaux) créés"
+    )
 
 @bot.tree.command(name="proposer-idee", description="Demande à l'IA Gemini d'analyser le réseau et de proposer une amélioration.")
 async def proposer_idee(interaction: discord.Interaction):
