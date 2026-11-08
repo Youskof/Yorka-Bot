@@ -40,14 +40,12 @@ def not_command_locked():
     """Vérifie si les commandes du bot sont verrouillées."""
     async def predicate(interaction: discord.Interaction) -> bool:
         if commands_locked_down:
-            # Seuls les administrateurs du serveur central gardent l'accès pendant le verrouillage (optionnel mais recommandé)
             if interaction.user.guild_permissions.administrator:
                 return True
             raise app_commands.CheckFailure("🔒 **Commandes suspendues :** Le système de commandes du bot est actuellement verrouillé par l'administration.")
         return True
     return app_commands.check(predicate)
 
-# Gestionnaire d'erreur global pour les checks (affiche proprement le message de verrouillage)
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
     if isinstance(error, app_commands.CheckFailure):
@@ -194,7 +192,7 @@ async def setup_central_channels():
     )
 
     embed_help.add_field(
-        name="🔒 CONTRÔLE GLOBAL DES COMMANDES (NOUVEAU)",
+        name="🔒 CONTRÔLE GLOBAL DES COMMANDES",
         value="• `/commandes-lock etat:Verrouiller / Déverrouiller` : Suspend ou rétablit l'accès à toutes les commandes Slash du réseau.",
         inline=False
     )
@@ -655,7 +653,7 @@ async def commandes_lock(interaction: discord.Interaction, etat: app_commands.Ch
     else:
         commands_locked_down = False
         embed = discord.Embed(
-            title="🔓 SYSTÈMES DE COMMANDES RÉ RÉTARBLIS",
+            title="🔓 SYSTÈMES DE COMMANDES RÉTABLIS",
             description="L'accès à toutes les commandes Slash du bot a été rétabli avec succès.",
             color=discord.Color.green(),
             timestamp=datetime.now()
@@ -1168,7 +1166,8 @@ async def on_member_remove(member):
 @bot.event
 async def on_guild_channel_create(channel):
     embed = discord.Embed(title="📂 Salon Créé", description=f"**#{channel.name}** créé.", color=discord.Color.blue())
-    await send_central_log(member.guild.id if hasattr(channel, 'guild') else CENTRAL_GUILD_ID, "salons", embed)
+    guild_id = channel.guild.id if hasattr(channel, 'guild') else CENTRAL_GUILD_ID
+    await send_central_log(guild_id, "salons", embed)
 
 @bot.event
 async def on_member_ban(guild, user):
