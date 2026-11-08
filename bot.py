@@ -48,12 +48,12 @@ async def on_ready():
 
     try:
         synced = await bot.tree.sync()
-        print(f"🔗 {len(synced)} commande(s) slash synchronisée(s).")
+        print(f"🔗 {len(synced)} commande(s) synchronisée(s).")
     except Exception as e:
         print(f"❌ Erreur de synchronisation : {e}")
 
 # =========================================================================
-# 🚨 BOUTON INTERACTIF DE CONFINEMENT D'URGENCE
+# 🚨 BOUTON INTERACTIF DE CONFINEMENT D'URGENCE (Sur les alertes globales)
 # =========================================================================
 
 class LockdownView(discord.ui.View):
@@ -77,14 +77,12 @@ class LockdownView(discord.ui.View):
         button.label = "🔒 Serveur Confiné"
         await interaction.message.edit(view=self)
 
-        # 1. Verrouillage des salons textuels
         for channel in target_guild.text_channels:
             try:
                 await channel.set_permissions(target_guild.default_role, send_messages=False)
             except Exception:
                 pass
 
-        # 2. Recherche d'un salon pour l'annonce publique
         target_channel = target_guild.system_channel
         if not target_channel:
             for ch in target_guild.text_channels:
@@ -106,6 +104,74 @@ class LockdownView(discord.ui.View):
                 pass
 
         await interaction.response.send_message(f"🔒 **Confinement activé avec succès** sur le serveur **{target_guild.name}**.", ephemeral=True)
+
+# =========================================================================
+# 📩 VUE INTERACTIVE DES BOUTONS DE TICKETS (Intégrée au salon ticket)
+# =========================================================================
+
+class TicketControlView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Pause / Reprendre", style=discord.ButtonStyle.secondary, emoji="⏸️", custom_id="ticket_pause_btn")
+    async def pause_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        channel_id = interaction.channel.id
+        if channel_id in paused_tickets:
+            paused_tickets.remove(channel_id)
+            button.label = "Pause / Reprendre"
+            button.style = discord.ButtonStyle.secondary
+            await interaction.response.edit_message(view=self)
+            await interaction.channel.send("▶️ **Le ticket a été réactivé.**")
+            
+            if interaction.channel.topic and "ID_USER:" in interaction.channel.topic:
+                user_id = int(interaction.channel.topic.split("ID_USER:")[1].strip())
+                user = bot.get_user(user_id)
+                if user:
+                    try: await user.send("▶️ Votre ticket a été réactivé par l'administration.")
+                    except Exception: pass
+        else:
+            paused_tickets.add(channel_id)
+            button.label = "Reprendre"
+            button.style = discord.ButtonStyle.success
+            await interaction.response.edit_message(view=self)
+            await interaction.channel.send("⏸️ **Le ticket a été mis en pause.**")
+            
+            if interaction.channel.topic and "ID_USER:" in interaction.channel.topic:
+                user_id = int(interaction.channel.topic.split("ID_USER:")[1].strip())
+                user = bot.get_user(user_id)
+                if user:
+                    try: await user.send("⏸️ Votre ticket a été mis en attente par l'administration.")
+                    except Exception: pass
+
+    @discord.ui.button(label="Fermer", style=discord.ButtonStyle.danger, emoji="🔒", custom_id="ticket_close_btn")
+    async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.channel.topic and "ID_USER:" in interaction.channel.topic:
+            user_id = int(interaction.channel.topic.split("ID_USER:")[1].strip())
+            user = bot.get_user(user_id)
+            if user:
+                try: await user.send("🔒 Votre ticket avec l'administration a été fermé.")
+                except Exception: pass
+
+        if interaction.channel.id in paused_tickets:
+            paused_tickets.remove(interaction.channel.id)
+
+        await interaction.response.send_message("🔒 Fermeture du ticket dans 5 secondes...")
+        await asyncio.sleep(5)
+        await interaction.channel.delete()
+
+    @discord.ui.button(label="Bloquer", style=discord.ButtonStyle.danger, emoji="🚫", custom_id="ticket_block_btn")
+    async def block_user(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.channel.topic and "ID_USER:" in interaction.channel.topic:
+            user_id = int(interaction.channel.topic.split("ID_USER:")[1].strip())
+            blocked_users.add(user_id)
+            user = bot.get_user(user_id)
+            if user:
+                try: await user.send("🚫 Vous avez été bloqué du système de support.")
+                except Exception: pass
+
+        await interaction.response.send_message("🚫 Utilisateur bloqué. Fermeture du salon dans 5 secondes...")
+        await asyncio.sleep(5)
+        await interaction.channel.delete()
 
 # =========================================================================
 # 📩 GESTION DES MP (TICKETS & DÉCONFINEMENT STAFF)
@@ -161,20 +227,25 @@ async def on_message(message):
         channel_name = f"ticket-{clean_name}"
         ticket_channel = discord.utils.get(cat_ticket.text_channels, name=channel_name)
 
-        # Création automatique du salon de ticket sur la centrale
+        # Création automatique du salon de ticket avec les boutons interactifs intégrés
         if not ticket_channel:
             ticket_channel = await central_guild.create_text_channel(
                 name=channel_name,
                 category=cat_ticket,
                 topic=f"ID_USER:{message.author.id}"
             )
+            
             embed_welcome = discord.Embed(
                 title=f"📩 Nouveau Ticket MP ouvert — {message.author}",
                 description=f"**Utilisateur :** {message.author.mention} (`{message.author.id}`)\n\n"
-                            f"💡 *Pour lever un confinement, envoyez en MP au bot : `unlock ID_DU_SERVEUR`*",
+                            f"⚙️ **Actions rapides :** Utilisez les boutons ci-dessous pour gérer ce ticket.\n"
+                            f"💡 *Pour lever un confinement par MP, envoyez : `unlock ID_DU_SERVEUR`*",
                 color=discord.Color.blue()
             )
-            await ticket_channel.send(embed=embed_welcome)
+            embed_welcome.set_thumbnail(url=message.author.display_avatar.url)
+            
+            # Envoi de l'embed avec les boutons de contrôle interactifs
+            await ticket_channel.send(embed=embed_welcome, view=TicketControlView())
             await message.channel.send("✅ Votre message a bien été transmis à l'équipe centralisée.")
 
         if ticket_channel.id in paused_tickets:
@@ -212,7 +283,7 @@ async def on_message(message):
     await bot.process_commands(message)
 
 # =========================================================================
-# ⚙️ COMMANDES SLASH DE GESTION DES TICKETS
+# ⚙️ COMMANDES SLASH DE GESTION DES TICKETS (Optionnelles si boutons utilisés)
 # =========================================================================
 
 @bot.tree.command(name="ticket-pause", description="Met le ticket en pause.")
