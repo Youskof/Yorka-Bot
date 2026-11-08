@@ -15,12 +15,12 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 CENTRAL_GUILD_ID = 1568910819008323594
 
-# Structures de suivi
+# Structures de suivi en mémoire
 raid_tracker = {}     # {guild_id: [timestamps]}
 channel_tracker = {}  # {guild_id: [timestamps]}
 paused_tickets = set()
 blocked_users = set()
-locked_down_servers = set() # Set des IDs de serveurs actuellement confinés
+locked_down_servers = set()
 
 @bot.event
 async def on_ready():
@@ -53,7 +53,7 @@ async def on_ready():
         print(f"❌ Erreur de synchronisation : {e}")
 
 # =========================================================================
-# 🚨 VUE ET BOUTON DE CONFINEMENT D'URGENCE (Interactif sur la Centrale)
+# 🚨 BOUTON INTERACTIF DE CONFINEMENT D'URGENCE
 # =========================================================================
 
 class LockdownView(discord.ui.View):
@@ -84,7 +84,7 @@ class LockdownView(discord.ui.View):
             except Exception:
                 pass
 
-        # 2. Recherche d'un salon d'annonces ou général pour poster l'alerte publique
+        # 2. Recherche d'un salon pour l'annonce publique
         target_channel = target_guild.system_channel
         if not target_channel:
             for ch in target_guild.text_channels:
@@ -108,7 +108,7 @@ class LockdownView(discord.ui.View):
         await interaction.response.send_message(f"🔒 **Confinement activé avec succès** sur le serveur **{target_guild.name}**.", ephemeral=True)
 
 # =========================================================================
-# 📩 GESTION DES TICKETS ET COMMANDES DE LEVÉE DE CONFINEMENT PAR MP
+# 📩 GESTION DES MP (TICKETS & DÉCONFINEMENT STAFF)
 # =========================================================================
 
 @bot.event
@@ -116,46 +116,37 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    # 1. Réception d'un MP (Ticket ou Commande de déconfinement du staff)
+    # 1. Réception d'un MP
     if isinstance(message.channel, discord.DMChannel):
         
-        # Vérification si un administrateur/fondateur veut lever un confinement via MP
-        # Syntaxe en MP au bot : "!unlock <ID_du_serveur>" ou "unlock <ID_du_serveur>"
+        # Commande staff pour lever le confinement via MP : "unlock ID"
         content_lower = message.content.strip().lower()
         if "unlock" in content_lower or "lever" in content_lower:
-            # Extraire l'ID du serveur du message
             import re
             numbers = re.findall(r'\d{17,20}', message.content)
             if numbers:
                 guild_id_to_unlock = int(numbers[0])
                 target_guild = bot.get_guild(guild_id_to_unlock)
                 if target_guild:
-                    # Vérifier si l'utilisateur est admin sur ce serveur
                     member_in_guild = target_guild.get_member(message.author.id)
                     if member_in_guild and member_in_guild.guild_permissions.administrator:
                         if guild_id_to_unlock in locked_down_servers:
                             locked_down_servers.remove(guild_id_to_unlock)
-                            # Déverrouiller les salons
                             for channel in target_guild.text_channels:
                                 try:
                                     await channel.set_permissions(target_guild.default_role, send_messages=None)
-                                except Exception:
-                                    pass
-                            
-                            # Annoncer la levée
+                                except Exception: pass
                             if target_guild.system_channel:
-                                await target_guild.system_channel.send("✅ **Le confinement d'urgence a été levé par un administrateur.** Les salons sont déverrouillés.")
-                            
-                            await message.channel.send(f"✅ Confinement levé avec succès sur le serveur **{target_guild.name}**.")
+                                await target_guild.system_channel.send("✅ **Le confinement d'urgence a été levé par un administrateur.**")
+                            await message.channel.send(f"✅ Confinement levé avec succès sur **{target_guild.name}**.")
                             return
                         else:
                             await message.channel.send("⚠️ Ce serveur n'est pas en confinement.")
                             return
                     else:
-                        await message.channel.send("❌ Vous n'avez pas les permissions d'administrateur sur ce serveur pour lever le confinement.")
+                        await message.channel.send("❌ Vous n'êtes pas administrateur sur ce serveur.")
                         return
 
-        # Gestion classique des tickets MP si ce n'est pas une commande de déconfinement
         if message.author.id in blocked_users:
             await message.channel.send("❌ Vous avez été bloqué du système de support/tickets.")
             return
@@ -166,9 +157,11 @@ async def on_message(message):
         cat_ticket = discord.utils.get(central_guild.categories, name="📩 ── [ TICKETS MP ] ──")
         if not cat_ticket: return
 
-        channel_name = f"ticket-{message.author.name.lower().replace(' ', '-')}"
+        clean_name = "".join(c for c in message.author.name.lower() if c.isalnum() or c in "-_")
+        channel_name = f"ticket-{clean_name}"
         ticket_channel = discord.utils.get(cat_ticket.text_channels, name=channel_name)
 
+        # Création automatique du salon de ticket sur la centrale
         if not ticket_channel:
             ticket_channel = await central_guild.create_text_channel(
                 name=channel_name,
@@ -178,7 +171,7 @@ async def on_message(message):
             embed_welcome = discord.Embed(
                 title=f"📩 Nouveau Ticket MP ouvert — {message.author}",
                 description=f"**Utilisateur :** {message.author.mention} (`{message.author.id}`)\n\n"
-                            f"💡 *Astuce Staff : Pour lever un confinement par MP, envoyez au bot : `unlock ID_DU_SERVEUR`*",
+                            f"💡 *Pour lever un confinement, envoyez en MP au bot : `unlock ID_DU_SERVEUR`*",
                 color=discord.Color.blue()
             )
             await ticket_channel.send(embed=embed_welcome)
@@ -190,9 +183,11 @@ async def on_message(message):
 
         embed_msg = discord.Embed(description=message.content, color=discord.Color.light_grey(), timestamp=datetime.now())
         embed_msg.set_author(name=f"{message.author} (MP)", icon_url=message.author.display_avatar.url)
+        if message.attachments:
+            embed_msg.set_image(url=message.attachments[0].url)
         await ticket_channel.send(embed=embed_msg)
 
-    # 2. Réponse depuis la Centrale -> MP de l'utilisateur
+    # 2. Réponse de la Centrale vers le MP de l'utilisateur
     elif message.guild and message.guild.id == CENTRAL_GUILD_ID:
         if message.channel.category and message.channel.category.name == "📩 ── [ TICKETS MP ] ──":
             if message.content.startswith("/") or message.content.startswith("!"):
@@ -207,6 +202,8 @@ async def on_message(message):
                 if user:
                     try:
                         embed_reply = discord.Embed(title="💬 Réponse du Support", description=message.content, color=discord.Color.green())
+                        if message.attachments:
+                            embed_reply.set_image(url=message.attachments[0].url)
                         await user.send(embed=embed_reply)
                         await message.add_reaction("✅")
                     except Exception:
@@ -251,11 +248,10 @@ async def ticket_block(interaction: discord.Interaction):
     await interaction.channel.delete()
 
 # =========================================================================
-# 🚨 DÉTECTION AVANCÉE (Mass Raid, Mass Pings, Mass Suppressions de salons)
+# 🚨 DÉTECTION SÉCURITÉ (Anti-Raid, Mass Pings, Mass Suppressions)
 # =========================================================================
 
-async def trigger_security_alert(guild: discord.guild, title: str, description: str):
-    """Envoie l'alerte sur la centrale avec le bouton de confinement d'urgence."""
+async def trigger_security_alert(guild: discord.Guild, title: str, description: str):
     central_guild = bot.get_guild(CENTRAL_GUILD_ID)
     if not central_guild: return
 
@@ -275,35 +271,19 @@ async def on_member_join(member):
     raid_tracker[guild_id] = [t for t in raid_tracker[guild_id] if now - t < timedelta(seconds=10)]
     raid_tracker[guild_id].append(now)
 
-    # Détection afflux massif
     if len(raid_tracker[guild_id]) >= 5:
         await trigger_security_alert(
             member.guild,
             "ALERTE AFFLUX MASSIF (ANTI-RAID)",
-            f"Vague anormale de membres détectée sur **{member.guild.name}** (`{guild.guild_id if hasattr(member, 'guild_id') else member.guild.id}`).\n"
+            f"Vague anormale de membres détectée sur **{member.guild.name}** (`{member.guild.id}`).\n"
             f"📊 `{len(raid_tracker[guild_id])}` arrivées en moins de 10 secondes."
         )
         raid_tracker[guild_id].clear()
 
-    # Log administratif normal
     embed = discord.Embed(title="📥 Nouveau Membre", description=f"**{member}** (`{member.id}`) a rejoint le serveur.", color=discord.Color.green())
     embed.set_thumbnail(url=member.display_avatar.url)
     embed.set_footer(text=f"Serveur : {member.guild.name}")
     await send_central_log(member.guild.id, "administratif", embed)
-
-@bot.event
-async def on_message(message):
-    # Gestion des mass pings (@everyone ou @here)
-    if message.guild and not message.author.bot:
-        if "@everyone" in message.content or "@here" in message.content:
-            # Vérifier si l'auteur n'est pas admin
-            if not message.author.guild_permissions.administrator:
-                await trigger_security_alert(
-                    message.guild,
-                    "ALERTE MASS PING DÉTECTÉ",
-                    f"Un utilisateur non-admin (**{message.author}**) a effectué un ping de masse (`@everyone` / `@here`) dans le salon {message.channel.mention} sur **{message.guild.name}**."
-                )
-    await bot.process_commands(message)
 
 @bot.event
 async def on_guild_channel_delete(channel):
@@ -314,12 +294,11 @@ async def on_guild_channel_delete(channel):
     channel_tracker[guild_id] = [t for t in channel_tracker[guild_id] if now - t < timedelta(seconds=10)]
     channel_tracker[guild_id].append(now)
 
-    # Détection suppression de masse de salons (> 3 en 10 sec)
     if len(channel_tracker[guild_id]) >= 3:
         await trigger_security_alert(
             channel.guild,
             "🚨 ALERTE SUPPRESSION MASSIVE DE SALONS",
-            f"Attention ! Une suppression en masse de salons a été détectée sur **{channel.guild.name}**.\n"
+            f"Attention ! Suppression en masse de salons détectée sur **{channel.guild.name}**.\n"
             f"🗑️ `{len(channel_tracker[guild_id])}` salons supprimés rapidement."
         )
         channel_tracker[guild_id].clear()
@@ -329,7 +308,7 @@ async def on_guild_channel_delete(channel):
     await send_central_log(channel.guild.id, "salons", embed)
 
 # =========================================================================
-# 🏗️ CRÉATION DES SALONS ET FICHE INFO (on_guild_join)
+# 🏗️ CRÉATION DES SALONS ET FICHE INFO LORS DE L'AJOUT
 # =========================================================================
 
 @bot.event
@@ -408,5 +387,5 @@ async def on_message_delete(message):
     embed = discord.Embed(title="🗑️ Message Supprimé", description=f"Par {message.author.mention} dans {message.channel.mention}.", color=discord.Color.red())
     await send_central_log(message.guild.id, "messages", embed)
 
-TOKEN = os.getenv("DISCORD_TOKEN", "METTEZ_VOTRE_TOKEN_ICI")
+TOKEN = os.getenv("DISCORD_TOKEN")
 bot.run(TOKEN)
