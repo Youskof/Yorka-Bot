@@ -174,8 +174,11 @@ async def setup_central_channels():
     )
 
     embed_help.add_field(
-        name="🏗️ DÉPLOIEMENT DE STRUCTURES (Slash Commands)",
-        value="• `/deploy-template server_id:<ID> model:<police>` : Reconstruit intégralement la structure des salons d'un serveur.",
+        name="🏗️ DÉPLOIEMENT & DESIGN (Slash Commands)",
+        value=(
+            "• `/deploy-template server_id:<ID> model:<police>` : Reconstruit intégralement la structure des salons d'un serveur.\n"
+            "• `/embed titre:<titre> description:<texte>` : Crée et envoie un bel embed personnalisé."
+        ),
         inline=False
     )
 
@@ -560,8 +563,25 @@ async def on_message(message):
         await bot.process_commands(message)
 
 # =========================================================================
-# ⚙️ COMMANDES SLASH (PROPOSER IDÉE, DÉPLOIEMENT & ADMINISTRATION)
+# ⚙️ COMMANDES SLASH (EMBED, DÉPLOIEMENT, IA & ADMINISTRATION)
 # =========================================================================
+
+@bot.tree.command(name="embed", description="Crée et envoie un bel embed personnalisé.")
+@app_commands.describe(titre="Le titre de l'embed", description="Le texte principal de l'embed")
+async def embed_cmd(interaction: discord.Interaction, titre: str, description: str):
+    if interaction.guild_id != CENTRAL_GUILD_ID:
+        await interaction.response.send_message("❌ Cette commande est réservée au serveur central.", ephemeral=True)
+        return
+
+    mon_embed = discord.Embed(
+        title=titre,
+        description=description,
+        color=discord.Color.blue(),
+        timestamp=datetime.now()
+    )
+    mon_embed.set_footer(text=f"Demandé par {interaction.user.name}", icon_url=interaction.user.display_avatar.url)
+
+    await interaction.response.send_message(embed=mon_embed)
 
 @bot.tree.command(name="deploy-template", description="Reconstruit intégralement les salons d'un serveur client selon un modèle préconfiguré.")
 @app_commands.describe(server_id="ID du serveur à restructurer", model="Modèle de structure à appliquer (ex: police)")
