@@ -393,7 +393,7 @@ async def on_message(message):
             embed_msg.set_image(url=message.attachments[0].url)
         await ticket_channel.send(embed=embed_msg)
 
-        # Réponse IA Gemini (Exécution asynchrone sécurisée)
+        # Réponse IA Gemini (Exécution asynchrone sécurisée avec le modèle gemini-3.8-flash)
         if ticket_channel.id in ai_handled_tickets:
             try:
                 prompt_system = (
@@ -406,7 +406,7 @@ async def on_message(message):
                 response = await loop.run_in_executor(
                     None,
                     lambda: ai_client.models.generate_content(
-                        model='gemini-2.5-flash',
+                        model='gemini-3.8-flash',
                         contents=f"{prompt_system}\n\nMessage de l'utilisateur : {message.content}"
                     )
                 )
@@ -499,7 +499,7 @@ async def proposer_idee(interaction: discord.Interaction):
         response = await loop.run_in_executor(
             None,
             lambda: ai_client.models.generate_content(
-                model='gemini-2.5-flash',
+                model='gemini-3.8-flash',
                 contents=prompt_idea
             )
         )
