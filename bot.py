@@ -174,7 +174,7 @@ async def setup_central_channels():
     )
 
     embed_help.add_field(
-        name="🏗️ DEPLOIEMENT DE STRUCTURES (Slash Commands)",
+        name="🏗️ DÉPLOIEMENT DE STRUCTURES (Slash Commands)",
         value="• `/deploy-template server_id:<ID> model:<police>` : Reconstruit intégralement la structure des salons d'un serveur.",
         inline=False
     )
@@ -248,8 +248,10 @@ async def on_ready():
 
         await setup_central_channels()
 
+    # Synchronisation propre et forcée sur le serveur central
     try:
         guild_obj = discord.Object(id=CENTRAL_GUILD_ID)
+        bot.tree.copy_global_to(guild=guild_obj)
         synced_guild = await bot.tree.sync(guild=guild_obj)
         print(f"🔗 {len(synced_guild)} commande(s) synchronisée(s) proprement sur le serveur central.")
     except Exception as e:
@@ -591,7 +593,6 @@ async def deploy_template(interaction: discord.Interaction, server_id: str, mode
 
     await interaction.followup.send(f"⏳ **Début du remplacement de structure sur {target_guild.name}...**\nSuppression des anciens salons et création du modèle `{model.name}`.")
 
-    # 1. Suppression de l'ancienne structure (Salons et Catégories)
     for channel in target_guild.channels:
         try:
             await channel.delete(reason=f"[RECONSTRUCTION] Déploiement du modèle {model.name} par {interaction.user}")
@@ -599,7 +600,6 @@ async def deploy_template(interaction: discord.Interaction, server_id: str, mode
         except Exception as e:
             print(f"Échec suppression salon {channel.name}: {e}")
 
-    # 2. Création de la nouvelle structure
     created_categories = 0
     created_channels = 0
 
@@ -622,7 +622,6 @@ async def deploy_template(interaction: discord.Interaction, server_id: str, mode
         except Exception as e:
             print(f"Erreur création catégorie/salon: {e}")
 
-    # 3. Notification finale sur la centrale
     central_guild = bot.get_guild(CENTRAL_GUILD_ID)
     if central_guild:
         for ch in central_guild.text_channels:
@@ -1037,7 +1036,6 @@ async def on_guild_join(guild):
     except Exception as e:
         print(f"Erreur join: {e}")
 
-# Fonctions annexes de logs
 async def send_central_log(guild_id: int, log_type: str, embed: discord.Embed):
     central_guild = bot.get_guild(CENTRAL_GUILD_ID)
     if not central_guild: return
