@@ -393,7 +393,7 @@ async def on_message(message):
             embed_msg.set_image(url=message.attachments[0].url)
         await ticket_channel.send(embed=embed_msg)
 
-        # Réponse IA Gemini (Exécution asynchrone sécurisée avec le modèle gemini-3.8-flash)
+        # Réponse IA Gemini (Exécution asynchrone sécurisée avec boucle anti-503)
         if ticket_channel.id in ai_handled_tickets:
             try:
                 prompt_system = (
@@ -403,13 +403,25 @@ async def on_message(message):
                 )
 
                 loop = asyncio.get_event_loop()
-                response = await loop.run_in_executor(
-                    None,
-                    lambda: ai_client.models.generate_content(
-                        model='gemini-3.8-flash',
-                        contents=f"{prompt_system}\n\nMessage de l'utilisateur : {message.content}"
-                    )
-                )
+                response = None
+                for attempt in range(3):
+                    try:
+                        response = await loop.run_in_executor(
+                            None,
+                            lambda: ai_client.models.generate_content(
+                                model='gemini-3.8-flash',
+                                contents=f"{prompt_system}\n\nMessage de l'utilisateur : {message.content}"
+                            )
+                        )
+                        if response:
+                            break
+                    except Exception as api_err:
+                        if "503" in str(api_err) and attempt < 2:
+                            await asyncio.sleep(2)
+                            continue
+                        else:
+                            raise api_err
+
                 ai_reply_text = response.text
 
                 embed_ai = discord.Embed(
@@ -426,7 +438,7 @@ async def on_message(message):
                 await ticket_channel.send(embed=embed_log_ai)
 
             except Exception as e:
-                print(f"❌ Erreur IA Gemini : {e}")
+                print(f"❌ Erreur IA Gemini (MP) : {e}")
                 embed_fallback = discord.Embed(
                     description="✅ Votre message a bien été transmis à l'équipe d'administration.",
                     color=discord.Color.light_grey()
@@ -496,13 +508,25 @@ async def proposer_idee(interaction: discord.Interaction):
         )
 
         loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
-            None,
-            lambda: ai_client.models.generate_content(
-                model='gemini-3.8-flash',
-                contents=prompt_idea
-            )
-        )
+        response = None
+        for attempt in range(3):
+            try:
+                response = await loop.run_in_executor(
+                    None,
+                    lambda: ai_client.models.generate_content(
+                        model='gemini-3.8-flash',
+                        contents=prompt_idea
+                    )
+                )
+                if response:
+                    break
+            except Exception as api_err:
+                if "503" in str(api_err) and attempt < 2:
+                    await asyncio.sleep(2)
+                    continue
+                else:
+                    raise api_err
+
         idea_text = response.text
 
         central_guild = bot.get_guild(CENTRAL_GUILD_ID)
