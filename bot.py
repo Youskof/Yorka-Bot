@@ -176,9 +176,13 @@ async def on_ready():
 
         await setup_central_channels()
 
+    # Synchronisation forcée instantanée sur le serveur central + globale
     try:
-        synced = await bot.tree.sync()
-        print(f"🔗 {len(synced)} commande(s) synchronisée(s).")
+        guild_obj = discord.Object(id=CENTRAL_GUILD_ID)
+        bot.tree.copy_global_to(guild=guild_obj)
+        synced_guild = await bot.tree.sync(guild=guild_obj)
+        synced_global = await bot.tree.sync()
+        print(f"🔗 {len(synced_guild)} commande(s) synchronisée(s) instantanément sur le serveur central.")
     except Exception as e:
         print(f"❌ Erreur de synchronisation : {e}")
 
@@ -399,7 +403,7 @@ async def on_message(message):
                 prompt_system = (
                     "Tu es l'assistant virtuel officiel d'une administration centralisée de serveurs Discord. "
                     "Tu réponds aux utilisateurs en MP de manière polie, claire, professionnelle et rassurante. "
-                    "Précise-leur que leur message a bien été transmis aux administrateurs humains et réponds à leur question s'ils en ont une."
+                    "Précise-leur que leur message a bien été transmitted aux administrateurs humains et réponds à leur question s'ils en ont une."
                 )
 
                 loop = asyncio.get_event_loop()
