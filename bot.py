@@ -245,12 +245,13 @@ class TicketControlView(discord.ui.View):
 
     @discord.ui.button(label="Pause / Reprendre", style=discord.ButtonStyle.secondary, emoji="⏸️", custom_id="ticket_pause_btn")
     async def pause_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
         channel_id = interaction.channel.id
         if channel_id in paused_tickets:
             paused_tickets.remove(channel_id)
             button.label = "Pause / Reprendre"
             button.style = discord.ButtonStyle.secondary
-            await interaction.response.edit_message(view=self)
+            await interaction.message.edit(view=self)
             await interaction.channel.send("▶️ **Le ticket a été réactivé.**")
             
             if interaction.channel.topic and "ID_USER:" in interaction.channel.topic:
@@ -263,7 +264,7 @@ class TicketControlView(discord.ui.View):
             paused_tickets.add(channel_id)
             button.label = "Reprendre"
             button.style = discord.ButtonStyle.success
-            await interaction.response.edit_message(view=self)
+            await interaction.message.edit(view=self)
             await interaction.channel.send("⏸️ **Le ticket a été mis en pause.**")
             
             if interaction.channel.topic and "ID_USER:" in interaction.channel.topic:
@@ -275,6 +276,8 @@ class TicketControlView(discord.ui.View):
 
     @discord.ui.button(label="Fermer", style=discord.ButtonStyle.danger, emoji="🔒", custom_id="ticket_close_btn")
     async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("🔒 Fermeture du ticket en cours...", ephemeral=True)
+
         if interaction.channel.topic and "ID_USER:" in interaction.channel.topic:
             user_id = int(interaction.channel.topic.split("ID_USER:")[1].strip())
             user = bot.get_user(user_id)
@@ -287,12 +290,13 @@ class TicketControlView(discord.ui.View):
         if interaction.channel.id in ai_handled_tickets:
             ai_handled_tickets.remove(interaction.channel.id)
 
-        await interaction.response.send_message("🔒 Fermeture du ticket dans 5 secondes...")
-        await asyncio.sleep(5)
+        await asyncio.sleep(2)
         await interaction.channel.delete()
 
     @discord.ui.button(label="Bloquer", style=discord.ButtonStyle.danger, emoji="🚫", custom_id="ticket_block_btn")
     async def block_user(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("🚫 Utilisateur bloqué. Fermeture...", ephemeral=True)
+
         if interaction.channel.topic and "ID_USER:" in interaction.channel.topic:
             user_id = int(interaction.channel.topic.split("ID_USER:")[1].strip())
             blocked_users.add(user_id)
@@ -304,8 +308,7 @@ class TicketControlView(discord.ui.View):
         if interaction.channel.id in ai_handled_tickets:
             ai_handled_tickets.remove(interaction.channel.id)
 
-        await interaction.response.send_message("🚫 Utilisateur bloqué. Fermeture du salon dans 5 secondes...")
-        await asyncio.sleep(5)
+        await asyncio.sleep(2)
         await interaction.channel.delete()
 
 # =========================================================================
@@ -434,7 +437,6 @@ async def on_message(message):
     # 2. Réponse de la Centrale vers l'utilisateur en MP
     elif message.guild and message.guild.id == CENTRAL_GUILD_ID:
         if message.channel.category and message.channel.category.name == "📩 ── [ TICKETS MP ] ──":
-            # Si c'est une commande texte classique commençant par '!'
             if message.content.startswith("!"):
                 await bot.process_commands(message)
                 return
@@ -471,7 +473,6 @@ async def on_message(message):
                 except Exception as e:
                     await message.channel.send(f"❌ Erreur lors de l'envoi du MP : `{e}`")
 
-    # Ne traite les commandes textuelles que si elles commencent par '!' pour éviter les erreurs sur les Slash Commands
     if message.content.startswith("!"):
         await bot.process_commands(message)
 
