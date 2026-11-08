@@ -29,6 +29,35 @@ blocked_users = set()
 locked_down_servers = set()
 ai_handled_tickets = set()
 
+# 🔒 ÉTAT DU VERROUILLAGE DES COMMANDES (False = Actives, True = Verrouillées)
+commands_locked_down = False
+
+# =========================================================================
+# 🛡️ DÉCORATEUR DE VÉRIFICATION DES COMMANDES SLASH
+# =========================================================================
+
+def not_command_locked():
+    """Vérifie si les commandes du bot sont verrouillées."""
+    async def predicate(interaction: discord.Interaction) -> bool:
+        if commands_locked_down:
+            # Seuls les administrateurs du serveur central gardent l'accès pendant le verrouillage (optionnel mais recommandé)
+            if interaction.user.guild_permissions.administrator:
+                return True
+            raise app_commands.CheckFailure("🔒 **Commandes suspendues :** Le système de commandes du bot est actuellement verrouillé par l'administration.")
+        return True
+    return app_commands.check(predicate)
+
+# Gestionnaire d'erreur global pour les checks (affiche proprement le message de verrouillage)
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.CheckFailure):
+        if not interaction.response.is_done():
+            await interaction.response.send_message(str(error), ephemeral=True)
+        else:
+            await interaction.followup.send(str(error), ephemeral=True)
+    else:
+        print(f"❌ Erreur de commande Slash : {error}")
+
 # =========================================================================
 # 🏛️ MODÈLES DE STRUCTURES DE SERVEURS (TEMPLATES)
 # =========================================================================
@@ -165,6 +194,12 @@ async def setup_central_channels():
     )
 
     embed_help.add_field(
+        name="🔒 CONTRÔLE GLOBAL DES COMMANDES (NOUVEAU)",
+        value="• `/commandes-lock etat:Verrouiller / Déverrouiller` : Suspend ou rétablit l'accès à toutes les commandes Slash du réseau.",
+        inline=False
+    )
+
+    embed_help.add_field(
         name="🤖 SUPPORT INTELLIGENT & SUGGESTIONS (IA GEMINI)",
         value=(
             "• **Support MP** : Gemini répond automatiquement aux membres 24h/24 tant qu'un admin n'a pas pris le relais.\n"
@@ -206,15 +241,6 @@ async def setup_central_channels():
         inline=False
     )
 
-    embed_help.add_field(
-        name="🚨 SÉCURITÉ & PROTOCOLE ANTI-RAID",
-        value=(
-            "• **Confinement d'Urgence** : Bouton rouge dans `#🚨-erreurs-globales`.\n"
-            "• **Levée par MP** : Envoyez au bot : `unlock <ID_SERVEUR>`."
-        ),
-        inline=False
-    )
-
     embed_help.set_footer(text="Système de documentation dynamique • Propulsé par Gemini AI")
 
     async for message in help_channel.history(limit=10):
@@ -251,7 +277,6 @@ async def on_ready():
 
         await setup_central_channels()
 
-    # Synchronisation propre et forcée sur le serveur central
     try:
         guild_obj = discord.Object(id=CENTRAL_GUILD_ID)
         bot.tree.copy_global_to(guild=guild_obj)
@@ -390,11 +415,51 @@ class TicketControlView(discord.ui.View):
         await interaction.channel.delete()
 
 # =========================================================================
-# 📩 GESTION DES MP (TICKETS, SUPPORT IA & DÉCONFINEMENT STAFF)
+# 🔍 TRAÇABILITÉ DES COMMANDES & SUPPORT MP
 # =========================================================================
+
+async def send_central_log(guild_id: int, log_type: str, embed: discord.Embed):
+    central_guild = bot.get_guild(CENTRAL_GUILD_ID)
+    if not central_guild: return
+    for channel in central_guild.text_channels:
+        if str(guild_id) in channel.name and log_type in channel.name:
+            try: await channel.send(embed=embed)
+            except Exception: pass
+            break
+
+@bot.event
+async def on_interaction(interaction: discord.Interaction):
+    if interaction.type == discord.InteractionType.application_command:
+        if interaction.guild:
+            user = interaction.user
+            command_name = interaction.command.name if interaction.command else "Inconnue"
+            
+            embed = discord.Embed(
+                title="🔍 Traçabilité — Commande Slash",
+                color=discord.Color.dark_teal(),
+                timestamp=datetime.now()
+            )
+            embed.add_field(name="👤 Utilisateur", value=f"{user.mention} (`{user.id}`)", inline=True)
+            embed.add_field(name="🤖 Commande", value=f"`/{command_name}`", inline=True)
+            embed.add_field(name="📁 Salon", value=interaction.channel.mention if interaction.channel else "Inconnu", inline=True)
+            embed.set_footer(text=f"ID Auteur : {user.id}")
+            
+            await send_central_log(interaction.guild.id, "commandes", embed)
 
 @bot.event
 async def on_message(message):
+    if message.author.bot and message.author != bot.user:
+        if message.guild and (message.content.startswith("!") or message.content.startswith("/") or message.embeds):
+            embed = discord.Embed(
+                title="📜 Traçabilité — Activité Autre Bot",
+                color=discord.Color.blurple(),
+                timestamp=datetime.now()
+            )
+            embed.add_field(name="🤖 Bot Auteur", value=f"{message.author.mention} (`{message.author.id}`)", inline=True)
+            embed.add_field(name="📁 Salon", value=message.channel.mention, inline=True)
+            embed.add_field(name="📝 Contenu / Message", value=f"```{message.content[:900] if message.content else 'Embed / Média'}```", inline=False)
+            await send_central_log(message.guild.id, "commandes", embed)
+
     if message.author.bot:
         return
 
@@ -563,11 +628,43 @@ async def on_message(message):
         await bot.process_commands(message)
 
 # =========================================================================
-# ⚙️ COMMANDES SLASH (EMBED, DÉPLOIEMENT, IA & ADMINISTRATION)
+# ⚙️ COMMANDES SLASH (AVEC PROTECTION DE VERROUILLAGE GLOBAL)
 # =========================================================================
+
+@bot.tree.command(name="commandes-lock", description="Verrouille ou déverrouille l'accès à toutes les commandes du bot.")
+@app_commands.describe(etat="Choisissez l'état des commandes du bot")
+@app_commands.choices(etat=[
+    app_commands.Choice(name="🔒 Verrouiller (Bloquer tout)", value="lock"),
+    app_commands.Choice(name="🔓 Déverrouiller (Rétablir)", value="unlock")
+])
+async def commandes_lock(interaction: discord.Interaction, etat: app_commands.Choice[str]):
+    if interaction.guild_id != CENTRAL_GUILD_ID:
+        await interaction.response.send_message("❌ Réservé au serveur central.", ephemeral=True)
+        return
+
+    global commands_locked_down
+    if etat.value == "lock":
+        commands_locked_down = True
+        embed = discord.Embed(
+            title="🔒 SYSTÈMES DE COMMANDES VERROUILLÉS",
+            description="Le bot a suspendu l'utilisation de toutes ses commandes Slash pour l'ensemble des utilisateurs.",
+            color=discord.Color.red(),
+            timestamp=datetime.now()
+        )
+        await interaction.response.send_message(embed=embed)
+    else:
+        commands_locked_down = False
+        embed = discord.Embed(
+            title="🔓 SYSTÈMES DE COMMANDES RÉ RÉTARBLIS",
+            description="L'accès à toutes les commandes Slash du bot a été rétabli avec succès.",
+            color=discord.Color.green(),
+            timestamp=datetime.now()
+        )
+        await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="embed", description="Crée et envoie un bel embed personnalisé.")
 @app_commands.describe(titre="Le titre de l'embed", description="Le texte principal de l'embed")
+@not_command_locked()
 async def embed_cmd(interaction: discord.Interaction, titre: str, description: str):
     if interaction.guild_id != CENTRAL_GUILD_ID:
         await interaction.response.send_message("❌ Cette commande est réservée au serveur central.", ephemeral=True)
@@ -588,6 +685,7 @@ async def embed_cmd(interaction: discord.Interaction, titre: str, description: s
 @app_commands.choices(model=[
     app_commands.Choice(name="Police Nationale / Gendarmerie (RP)", value="police")
 ])
+@not_command_locked()
 async def deploy_template(interaction: discord.Interaction, server_id: str, model: app_commands.Choice[str]):
     if interaction.guild_id != CENTRAL_GUILD_ID:
         await interaction.response.send_message("❌ Réservé au serveur central.", ephemeral=True)
@@ -666,6 +764,7 @@ async def deploy_template(interaction: discord.Interaction, server_id: str, mode
     )
 
 @bot.tree.command(name="proposer-idee", description="Demande à l'IA Gemini d'analyser le réseau et de proposer une amélioration.")
+@not_command_locked()
 async def proposer_idee(interaction: discord.Interaction):
     if interaction.guild_id != CENTRAL_GUILD_ID:
         await interaction.response.send_message("❌ Réservé au serveur central.", ephemeral=True)
@@ -724,6 +823,7 @@ async def proposer_idee(interaction: discord.Interaction):
 
 @bot.tree.command(name="global-ban", description="Bannit un utilisateur de TOUS les serveurs du réseau avec notification MP.")
 @app_commands.describe(user_id="ID de l'utilisateur à bannir", raison="Raison du bannissement global")
+@not_command_locked()
 async def global_ban(interaction: discord.Interaction, user_id: str, raison: str):
     if interaction.guild_id != CENTRAL_GUILD_ID:
         await interaction.response.send_message("❌ Cette commande est réservée au serveur central.", ephemeral=True)
@@ -787,6 +887,7 @@ async def global_ban(interaction: discord.Interaction, user_id: str, raison: str
 
 @bot.tree.command(name="global-kick", description="Expulse un utilisateur de TOUS les serveurs du réseau avec notification MP.")
 @app_commands.describe(user_id="ID de l'utilisateur à expulser", raison="Raison de l'expulsion globale")
+@not_command_locked()
 async def global_kick(interaction: discord.Interaction, user_id: str, raison: str):
     if interaction.guild_id != CENTRAL_GUILD_ID:
         await interaction.response.send_message("❌ Cette commande est réservée au serveur central.", ephemeral=True)
@@ -851,6 +952,7 @@ async def global_kick(interaction: discord.Interaction, user_id: str, raison: st
     await interaction.followup.send(f"✅ Expulsion globale exécutée pour **{user_to_kick}**. (`{len(kicked_guilds)}` serveurs affectés)")
 
 @bot.tree.command(name="stats-reseau", description="Affiche l'état global et les statistiques de l'infrastructure.")
+@not_command_locked()
 async def stats_reseau(interaction: discord.Interaction):
     if interaction.guild_id != CENTRAL_GUILD_ID:
         await interaction.response.send_message("❌ Cette commande est réservée au serveur central.", ephemeral=True)
@@ -878,6 +980,7 @@ async def stats_reseau(interaction: discord.Interaction):
 
 @bot.tree.command(name="diffuser", description="Diffuse un message officiel sur tous les serveurs clients.")
 @app_commands.describe(titre="Titre de l'annonce", message="Contenu de l'annonce")
+@not_command_locked()
 async def diffuser(interaction: discord.Interaction, titre: str, message: str):
     if interaction.guild_id != CENTRAL_GUILD_ID:
         await interaction.response.send_message("❌ Cette commande est réservée au serveur central.", ephemeral=True)
@@ -1027,6 +1130,7 @@ async def on_guild_join(guild):
         await central_guild.create_text_channel(name=f"⚙️-salons-{guild.id}", category=category)
         await central_guild.create_text_channel(name=f"🔨-sanctions-{guild.id}", category=category)
         await central_guild.create_text_channel(name=f"💬-messages-{guild.id}", category=category)
+        await central_guild.create_text_channel(name=f"📜-commandes-{guild.id}", category=category)
 
         total_members = guild.member_count
         bots_count = sum(1 for m in guild.members if m.bot)
@@ -1056,15 +1160,6 @@ async def on_guild_join(guild):
     except Exception as e:
         print(f"Erreur join: {e}")
 
-async def send_central_log(guild_id: int, log_type: str, embed: discord.Embed):
-    central_guild = bot.get_guild(CENTRAL_GUILD_ID)
-    if not central_guild: return
-    for channel in central_guild.text_channels:
-        if str(guild_id) in channel.name and log_type in channel.name:
-            try: await channel.send(embed=embed)
-            except Exception: pass
-            break
-
 @bot.event
 async def on_member_remove(member):
     embed = discord.Embed(title="📤 Départ", description=f"**{member}** a quitté le serveur.", color=discord.Color.orange())
@@ -1073,7 +1168,7 @@ async def on_member_remove(member):
 @bot.event
 async def on_guild_channel_create(channel):
     embed = discord.Embed(title="📂 Salon Créé", description=f"**#{channel.name}** créé.", color=discord.Color.blue())
-    await send_central_log(channel.guild.id, "salons", embed)
+    await send_central_log(member.guild.id if hasattr(channel, 'guild') else CENTRAL_GUILD_ID, "salons", embed)
 
 @bot.event
 async def on_member_ban(guild, user):
