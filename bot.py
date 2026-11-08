@@ -390,17 +390,23 @@ async def on_message(message):
             embed_msg.set_image(url=message.attachments[0].url)
         await ticket_channel.send(embed=embed_msg)
 
-        # Réponse IA Gemini
+       # Réponse IA Gemini (Exécution asynchrone sécurisée)
         if ticket_channel.id in ai_handled_tickets:
             try:
                 prompt_system = (
                     "Tu es l'assistant virtuel officiel d'une administration centralisée de serveurs Discord. "
                     "Tu réponds aux utilisateurs en MP de manière polie, claire, professionnelle et rassurante. "
-                    "Précise-leur que leur message a bien été transmis aux administrateurs humains et réponds à leur question s'ils en ont une."
+                    "Précise-leur que leur message a bien été transmis aux administrateurs humains et réponds à leur question s'ils en ont una."
                 )
-                response = ai_client.models.generate_content(
-                    model='gemini-2.5-flash',
-                    contents=f"{prompt_system}\n\nMessage de l'utilisateur : {message.content}"
+
+                # Utilisation d'asyncio pour ne pas bloquer le bot pendant que l'IA réfléchit
+                loop = asyncio.get_event_loop()
+                response = await loop.run_in_executor(
+                    None,
+                    lambda: ai_client.models.generate_content(
+                        model='gemini-2.5-flash',
+                        contents=f"{prompt_system}\n\nMessage de l'utilisateur : {message.content}"
+                    )
                 )
                 ai_reply_text = response.text
 
@@ -418,8 +424,14 @@ async def on_message(message):
                 await ticket_channel.send(embed=embed_log_ai)
 
             except Exception as e:
-                print(f"Erreur IA Gemini : {e}")
-                await message.channel.send("✅ Votre message a bien été transmis à l'équipe d'administration.")
+                print(f"❌ Erreur IA Gemini : {e}")
+                # En cas d'erreur de la clé ou de l'API, message de secours automatique
+                embed_fallback = discord.Embed(
+                    description="✅ Votre message a bien été transmis à l'équipe d'administration.",
+                    color=discord.Color.light_grey()
+                )
+                embed_fallback.set_footer(text="🤖 Système de transmission")
+                await message.channel.send(embed=embed_fallback)
 
     # 2. Réponse de la Centrale vers l'utilisateur en MP
     elif message.guild and message.guild.id == CENTRAL_GUILD_ID:
