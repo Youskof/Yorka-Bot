@@ -19,7 +19,6 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 CENTRAL_GUILD_ID = 1568910819008323594
 
 # Initialisation du client Gemini AI
-# (Récupère automatiquement la clé depuis la variable d'environnement GEMINI_API_KEY)
 ai_client = genai.Client()
 
 # Structures de suivi en mémoire
@@ -28,13 +27,51 @@ channel_tracker = {}  # {guild_id: [timestamps]}
 paused_tickets = set()
 blocked_users = set()
 locked_down_servers = set()
-ai_handled_tickets = set() # Pour savoir si l'IA gère le ticket ou si un humain a repris
+ai_handled_tickets = set()
 
 # =========================================================================
-# 📜 FONCTION D'AUTO-MISE À JOUR DU SALON COMMANDES
+# 💡 VUE INTERACTIVE DES SUGGESTIONS IA (Accepter / Refuser / Personnaliser)
 # =========================================================================
 
-async def update_help_channel():
+class SuggestionView(discord.ui.View):
+    def __init__(self, suggestion_text: str):
+        super().__init__(timeout=None)
+        self.suggestion_text = suggestion_text
+
+    @discord.ui.button(label="Accepter", style=discord.ButtonStyle.success, emoji="✅", custom_id="suggest_accept_btn")
+    async def accept_suggestion(self, interaction: discord.Interaction, button: discord.ui.Button):
+        for item in self.children:
+            item.disabled = True
+        await interaction.message.edit(view=self)
+        
+        embed_status = discord.Embed(
+            title="✅ Suggestion Validée",
+            description=f"**Cette idée a été acceptée par {interaction.user.mention} !**\n\n"
+                        f"Copie cette validation dans notre conversation pour que je te génère le code prêt à être poussé sur GitHub.",
+            color=discord.Color.green(),
+            timestamp=datetime.now()
+        )
+        await interaction.response.send_message(embed=embed_status)
+
+    @discord.ui.button(label="Refuser", style=discord.ButtonStyle.danger, emoji="❌", custom_id="suggest_refuse_btn")
+    async def refuse_suggestion(self, interaction: discord.Interaction, button: discord.ui.Button):
+        for item in self.children:
+            item.disabled = True
+        await interaction.message.edit(view=self)
+        await interaction.response.send_message("❌ **Suggestion rejetée et archivée.**", ephemeral=True)
+
+    @discord.ui.button(label="Personnaliser", style=discord.ButtonStyle.primary, emoji="💬", custom_id="suggest_custom_btn")
+    async def custom_suggestion(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "💬 **Instructions :** Indique-moi dans notre discussion les modifications précises que tu souhaites apporter à cette idée avant qu'on l'intègre au code.",
+            ephemeral=True
+        )
+
+# =========================================================================
+# 📜 AUTOMATISATION DES SALONS (DOCUMENTATION ET SUGGESTIONS IA)
+# =========================================================================
+
+async def setup_central_channels():
     central_guild = bot.get_guild(CENTRAL_GUILD_ID)
     if not central_guild:
         return
@@ -43,72 +80,74 @@ async def update_help_channel():
     if not cat_gestion:
         return
 
+    # Salon Documentation
     help_channel = discord.utils.get(cat_gestion.text_channels, name="📜-commandes-bot")
     if not help_channel:
         help_channel = await central_guild.create_text_channel(name="📜-commandes-bot", category=cat_gestion)
-        print("✅ Salon #📜-commandes-bot créé.")
 
-    embed = discord.Embed(
+    # Salon Suggestions IA
+    suggest_channel = discord.utils.get(cat_gestion.text_channels, name="💡-suggestions-ia")
+    if not suggest_channel:
+        suggest_channel = await central_guild.create_text_channel(name="💡-suggestions-ia", category=cat_gestion)
+
+    # Mise à jour du salon documentation
+    embed_help = discord.Embed(
         title="📚 DOCUMENTATION AUTOMATIQUE — COMMANDES & ACTIONS DU BOT",
         description="Ce salon est mis à jour automatiquement par le bot à chaque mise à jour ou ajout de fonctionnalités.",
         color=discord.Color.gold(),
         timestamp=datetime.now()
     )
 
-    embed.add_field(
-        name="🤖 SUPPORT INTELLIGENT (IA GEMINI)",
-        value="• **Réponse Automatique par IA** : Les tickets MP reçoivent une analyse et une réponse intelligente propulsée par Gemini 24h/24, tant qu'un administrateur n'a pas pris le relais manuellement.",
+    embed_help.add_field(
+        name="🤖 SUPPORT INTELLIGENT & SUGGESTIONS (IA GEMINI)",
+        value=(
+            "• **Support MP** : Gemini répond automatiquement aux membres 24h/24 tant qu'un admin n'a pas pris le relais.\n"
+            "• **Suggestions IA (`/proposer-idee`)** : L'IA formule des propositions d'améliorations dans `#💡-suggestions-ia` interactives avec boutons."
+        ),
         inline=False
     )
 
-    embed.add_field(
+    embed_help.add_field(
         name="🔨 MODÉRATION GLOBALE (Slash Commands)",
         value=(
-            "• `/global-ban user_id:<ID> raison:<motif>` : Bannit l'utilisateur de **tous** les serveurs du réseau d'un coup + envoie un MP à la cible et trace l'action dans `#🔨-sanctions-globales`.\n"
-            "• `/global-kick user_id:<ID> raison:<motif>` : Expulse l'utilisateur de **tous** les serveurs du réseau + notification MP et log."
+            "• `/global-ban user_id:<ID> raison:<motif>` : Bannit de **tous** les serveurs du réseau + notification MP et log.\n"
+            "• `/global-kick user_id:<ID> raison:<motif>` : Expulse de **tous** les serveurs du réseau + notification MP et log."
         ),
         inline=False
     )
 
-    embed.add_field(
+    embed_help.add_field(
         name="📊 GESTION & INFRASTRUCTURE (Slash Commands)",
         value=(
-            "• `/stats-reseau` : Affiche les statistiques en direct du réseau (nombre de serveurs, membres cumulés, salons surveillés, confinements actifs).\n"
-            "• `/diffuser titre:<titre> message:<texte>` : Diffuse une annonce officielle stylisée dans le salon principal de **tous** les serveurs clients."
+            "• `/stats-reseau` : Affiche les statistiques globales du réseau (serveurs, membres cumulés, confinements).\n"
+            "• `/diffuser titre:<titre> message:<texte>` : Diffuse une annonce officielle dans le salon principal de **tous** les serveurs."
         ),
         inline=False
     )
 
-    embed.add_field(
-        name="📩 GESTION DES TICKETS MP (Boutons sous l'Embed)",
-        value=(
-            "• `⏸️ Pause / Reprendre` : Met en pause le ticket ou le réactive.\n"
-            "• `🔒 Fermer` : Ferme et supprime le salon de ticket central après notification au membre.\n"
-            "• `🚫 Bloquer` : Bloque l'utilisateur du système de support et détruit le salon."
-        ),
+    embed_help.add_field(
+        name="📩 GESTION DES TICKETS MP (Boutons interactifs)",
+        value="• `⏸️ Pause / Reprendre` | `🔒 Fermer` | `🚫 Bloquer`",
         inline=False
     )
 
-    embed.add_field(
+    embed_help.add_field(
         name="🚨 SÉCURITÉ & PROTOCOLE ANTI-RAID",
         value=(
-            "• **Détection automatique** : Surveillance des pings de masse, vagues d'arrivées et suppressions de salons.\n"
-            "• **Confinement d'Urgence** : Bouton rouge interactif dans `#🚨-erreurs-globales` pour verrouiller le serveur ciblé et faire une annonce `@everyone`.\n"
-            "• **Levée du confinement** : Un administrateur peut lever le confinement à tout moment en envoyant en MP au bot : `unlock <ID_DU_SERVEUR>`."
+            "• **Confinement d'Urgence** : Bouton rouge dans `#🚨-erreurs-globales`.\n"
+            "• **Levée par MP** : Envoyez au bot : `unlock <ID_SERVEUR>`."
         ),
         inline=False
     )
 
-    embed.set_footer(text="Système de documentation dynamique • Propulsé par Gemini AI")
+    embed_help.set_footer(text="Système de documentation dynamique • Propulsé par Gemini AI")
 
     async for message in help_channel.history(limit=10):
         if message.author == bot.user and message.embeds:
-            await message.edit(embed=embed)
-            print("✅ Salon #📜-commandes-bot mis à jour avec succès.")
-            return
-
-    await help_channel.send(embed=embed)
-    print("✅ Documentation envoyée dans #📜-commandes-bot.")
+            await message.edit(embed=embed_help)
+            break
+    else:
+        await help_channel.send(embed=embed_help)
 
 @bot.event
 async def on_ready():
@@ -135,7 +174,7 @@ async def on_ready():
             }
             await central_guild.create_category(name="📩 ── [ TICKETS MP ] ──", overwrites=overwrites)
 
-        await update_help_channel()
+        await setup_central_channels()
 
     try:
         synced = await bot.tree.sync()
@@ -323,15 +362,13 @@ async def on_message(message):
         channel_name = f"ticket-{clean_name}"
         ticket_channel = discord.utils.get(cat_ticket.text_channels, name=channel_name)
 
-        is_new_ticket = False
         if not ticket_channel:
-            is_new_ticket = True
             ticket_channel = await central_guild.create_text_channel(
                 name=channel_name,
                 category=cat_ticket,
                 topic=f"ID_USER:{message.author.id}"
             )
-            ai_handled_tickets.add(ticket_channel.id) # Active l'IA par défaut sur le nouveau ticket
+            ai_handled_tickets.add(ticket_channel.id)
             
             embed_welcome = discord.Embed(
                 title=f"📩 Nouveau Ticket MP ouvert — {message.author}",
@@ -347,17 +384,15 @@ async def on_message(message):
             await message.channel.send("⏸️ Votre ticket est actuellement en pause.")
             return
 
-        # Transmission de la question dans le salon central
         embed_msg = discord.Embed(description=message.content, color=discord.Color.light_grey(), timestamp=datetime.now())
         embed_msg.set_author(name=f"{message.author} (MP)", icon_url=message.author.display_avatar.url)
         if message.attachments:
             embed_msg.set_image(url=message.attachments[0].url)
         await ticket_channel.send(embed=embed_msg)
 
-        # Réponse automatique via l'IA Gemini si aucun humain n'a pris le relais
+        # Réponse IA Gemini
         if ticket_channel.id in ai_handled_tickets:
             try:
-                # Utilisation du modèle gemini-2.5-flash (rapide et parfait pour le support)
                 prompt_system = (
                     "Tu es l'assistant virtuel officiel d'une administration centralisée de serveurs Discord. "
                     "Tu réponds aux utilisateurs en MP de manière polie, claire, professionnelle et rassurante. "
@@ -378,7 +413,6 @@ async def on_message(message):
                 embed_ai.set_footer(text="🤖 Réponse automatique générée par Gemini AI")
                 await message.channel.send(embed=embed_ai)
 
-                # Copie de la réponse de l'IA dans le salon central pour traçabilité
                 embed_log_ai = discord.Embed(description=ai_reply_text, color=discord.Color.blue(), timestamp=datetime.now())
                 embed_log_ai.set_author(name="Bot (Réponse IA)", icon_url=bot.user.display_avatar.url)
                 await ticket_channel.send(embed=embed_log_ai)
@@ -396,7 +430,6 @@ async def on_message(message):
             if message.channel.id in paused_tickets:
                 return
 
-            # Dès qu'un administrateur humain écrit dans le salon, on désactive l'IA pour ce ticket
             if message.channel.id in ai_handled_tickets:
                 ai_handled_tickets.remove(message.channel.id)
                 await message.channel.send("🛡️ *[Mode IA désactivé : un administrateur a pris le relais en manuel]*")
@@ -427,8 +460,46 @@ async def on_message(message):
     await bot.process_commands(message)
 
 # =========================================================================
-# ⚙️ COMMANDES SLASH DE MODÉRATION ET D'ADMINISTRATION GLOBALE
+# ⚙️ COMMANDES SLASH (PROPOSER IDÉE IA & MODÉRATION/ADMINISTRATION)
 # =========================================================================
+
+# COMMANDE POUR DEMANDER À L'IA UNE PROPOSITION D'AMÉLIORATION
+@bot.tree.command(name="proposer-idee", description="Demande à l'IA Gemini d'analyser le réseau et de proposer une amélioration.")
+async def proposer_idee(interaction: discord.Interaction):
+    if interaction.guild_id != CENTRAL_GUILD_ID:
+        await interaction.response.send_message("❌ Réservé au serveur central.", ephemeral=True)
+        return
+
+    await interaction.response.defer()
+    
+    try:
+        prompt_idea = (
+            "Tu es l'architecte IA d'un bot Discord multi-serveurs d'administration et de sécurité. "
+            "Propose une idée originale, concrète et utile d'ajout ou d'amélioration technique pour le réseau de serveurs. "
+            "Structure ta réponse avec un Titre court et percutant, une Description claire du besoin, et les Bénéfices pour le staff."
+        )
+        response = ai_client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt_idea
+        )
+        idea_text = response.text
+
+        central_guild = bot.get_guild(CENTRAL_GUILD_ID)
+        suggest_channel = discord.utils.get(central_guild.text_channels, name="💡-suggestions-ia")
+        if suggest_channel:
+            embed_suggest = discord.Embed(
+                title="💡 PROPOSITION D'AMÉLIORATION IA",
+                description=idea_text,
+                color=discord.Color.purple(),
+                timestamp=datetime.now()
+            )
+            embed_suggest.set_footer(text="Proposition générée par Gemini AI • Cliquez sur un bouton ci-dessous")
+            await suggest_channel.send(embed=embed_suggest, view=SuggestionView(idea_text))
+            await interaction.followup.send("✅ Une nouvelle proposition a été publiée dans `#💡-suggestions-ia` !")
+        else:
+            await interaction.followup.send("❌ Salon `#💡-suggestions-ia` introuvable.")
+    except Exception as e:
+        await interaction.followup.send(f"❌ Erreur lors de la génération d'idée : {e}")
 
 @bot.tree.command(name="global-ban", description="Bannit un utilisateur de TOUS les serveurs du réseau avec notification MP.")
 @app_commands.describe(user_id="ID de l'utilisateur à bannir", raison="Raison du bannissement global")
