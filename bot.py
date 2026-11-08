@@ -1,5 +1,6 @@
 import os
 import asyncio
+import re
 from datetime import datetime, timedelta
 import discord
 from discord import app_commands
@@ -192,8 +193,11 @@ async def setup_central_channels():
     )
 
     embed_help.add_field(
-        name="🔒 CONTRÔLE GLOBAL DES COMMANDES",
-        value="• `/commandes-lock etat:Verrouiller / Déverrouiller` : Suspend ou rétablit l'accès à toutes les commandes Slash du réseau.",
+        name="🔒 CONTRÔLE GLOBAL DES COMMANDES & EFFECTIFS",
+        value=(
+            "• `/commandes-lock etat:Verrouiller / Déverrouiller` : Suspend ou rétablit l'accès à toutes les commandes du réseau.\n"
+            "• `/effectif role:<rôle>` : Affiche la liste des membres du rôle triés par matricule (00 à 100)."
+        ),
         inline=False
     )
 
@@ -201,7 +205,7 @@ async def setup_central_channels():
         name="🤖 SUPPORT INTELLIGENT & SUGGESTIONS (IA GEMINI)",
         value=(
             "• **Support MP** : Gemini répond automatiquement aux membres 24h/24 tant qu'un admin n'a pas pris le relais.\n"
-            "• **Suggestions IA (`/proposer-idee`)** : L'IA formule des propositions d'améliorations dans `#💡-suggestions-ia` interactives avec boutons."
+            "• **Suggestions IA (`/proposer-idee`)** : L'IA formule des propositions d'améliorations dans `#💡-suggestions-ia`."
         ),
         inline=False
     )
@@ -227,15 +231,9 @@ async def setup_central_channels():
     embed_help.add_field(
         name="📊 GESTION & INFRASTRUCTURE (Slash Commands)",
         value=(
-            "• `/stats-reseau` : Affiche les statistiques globales du réseau (serveurs, membres cumulés, confinements).\n"
-            "• `/diffuser titre:<titre> message:<texte>` : Diffuse une annonce officielle dans le salon principal de **tous** les serveurs."
+            "• `/stats-reseau` : Affiche les statistiques globales du réseau.\n"
+            "• `/diffuser titre:<titre> message:<texte>` : Diffuse une annonce officielle."
         ),
-        inline=False
-    )
-
-    embed_help.add_field(
-        name="📩 GESTION DES TICKETS MP (Boutons interactifs)",
-        value="• `⏸️ Pause / Reprendre` | `🔒 Fermer` | `🚫 Bloquer`",
         inline=False
     )
 
@@ -659,6 +657,47 @@ async def commandes_lock(interaction: discord.Interaction, etat: app_commands.Ch
             timestamp=datetime.now()
         )
         await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="effectif", description="Affiche la liste des membres possédant un rôle, triés par matricule (de 00 à 100).")
+@app_commands.describe(role="Le rôle à cibler")
+@not_command_locked()
+async def effectif_cmd(interaction: discord.Interaction, role: discord.Role):
+    await interaction.response.defer(ephemeral=True)
+
+    membres_trouves = []
+    for member in interaction.guild.members:
+        if role in member.roles:
+            match = re.search(r'\b(0?[0-9]{1,2}|100)\b', member.display_name)
+            matricule_num = -1
+            if match:
+                matricule_num = int(match.group(1))
+            if 0 <= matricule_num <= 100:
+                membres_trouves.append((matricule_num, member))
+
+    membres_trouves.sort(key=lambda x: x[0])
+
+    if not membres_trouves:
+        await interaction.followup.send(f"❌ Aucun membre avec le rôle {role.mention} n'a pu être associé à un matricule valide (00-100) dans son pseudo.", ephemeral=True)
+        return
+
+    description_lines = []
+    for mat, member in membres_trouves:
+        matricule_str = f"{mat:02d}"
+        description_lines.append(f"**`[{matricule_str}]`** : {member.mention} (`{member.display_name}`)")
+
+    texte_total = "\n".join(description_lines)
+    if len(texte_total) > 4000:
+        texte_total = texte_total[:3997] + "..."
+
+    embed = discord.Embed(
+        title=f"📋 Registre des Effectifs — {role.name}",
+        description=texte_total,
+        color=discord.Color.blue(),
+        timestamp=datetime.now()
+    )
+    embed.set_footer(text=f"Total répertorié : {len(membres_trouves)} agent(s)")
+
+    await interaction.followup.send(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="embed", description="Crée et envoie un bel embed personnalisé.")
 @app_commands.describe(titre="Le titre de l'embed", description="Le texte principal de l'embed")
