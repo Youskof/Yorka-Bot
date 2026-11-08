@@ -390,16 +390,15 @@ async def on_message(message):
             embed_msg.set_image(url=message.attachments[0].url)
         await ticket_channel.send(embed=embed_msg)
 
-       # Réponse IA Gemini (Exécution asynchrone sécurisée)
+        # Réponse IA Gemini (Exécution asynchrone sécurisée)
         if ticket_channel.id in ai_handled_tickets:
             try:
                 prompt_system = (
                     "Tu es l'assistant virtuel officiel d'une administration centralisée de serveurs Discord. "
                     "Tu réponds aux utilisateurs en MP de manière polie, claire, professionnelle et rassurante. "
-                    "Précise-leur que leur message a bien été transmis aux administrateurs humains et réponds à leur question s'ils en ont una."
+                    "Précise-leur que leur message a bien été transmis aux administrateurs humains et réponds à leur question s'ils en ont une."
                 )
 
-                # Utilisation d'asyncio pour ne pas bloquer le bot pendant que l'IA réfléchit
                 loop = asyncio.get_event_loop()
                 response = await loop.run_in_executor(
                     None,
@@ -425,7 +424,6 @@ async def on_message(message):
 
             except Exception as e:
                 print(f"❌ Erreur IA Gemini : {e}")
-                # En cas d'erreur de la clé ou de l'API, message de secours automatique
                 embed_fallback = discord.Embed(
                     description="✅ Votre message a bien été transmis à l'équipe d'administration.",
                     color=discord.Color.light_grey()
@@ -447,10 +445,11 @@ async def on_message(message):
                 await message.channel.send("🛡️ *[Mode IA désactivé : un administrateur a pris le relais en manuel]*")
 
             if message.channel.topic and "ID_USER:" in message.channel.topic:
-                user_id = int(message.channel.topic.split("ID_USER:")[1].strip())
-                user = bot.get_user(user_id)
-                if user:
-                    try:
+                try:
+                    user_id = int(message.channel.topic.split("ID_USER:")[1].strip())
+                    user = await bot.fetch_user(user_id)
+                    
+                    if user:
                         embed_reply = discord.Embed(
                             title="💬 Réponse du Support",
                             description=message.content,
@@ -466,8 +465,10 @@ async def on_message(message):
                         
                         await user.send(embed=embed_reply)
                         await message.add_reaction("✅")
-                    except Exception:
-                        await message.channel.send("❌ Impossible d'envoyer le MP à l'utilisateur.")
+                    else:
+                        await message.channel.send("❌ Impossible de trouver cet utilisateur.")
+                except Exception as e:
+                    await message.channel.send(f"❌ Erreur lors de l'envoi du MP : `{e}`")
 
     await bot.process_commands(message)
 
@@ -475,14 +476,13 @@ async def on_message(message):
 # ⚙️ COMMANDES SLASH (PROPOSER IDÉE IA & MODÉRATION/ADMINISTRATION)
 # =========================================================================
 
-# COMMANDE POUR DEMANDER À L'IA UNE PROPOSITION D'AMÉLIORATION
 @bot.tree.command(name="proposer-idee", description="Demande à l'IA Gemini d'analyser le réseau et de proposer une amélioration.")
 async def proposer_idee(interaction: discord.Interaction):
     if interaction.guild_id != CENTRAL_GUILD_ID:
         await interaction.response.send_message("❌ Réservé au serveur central.", ephemeral=True)
         return
 
-    await interaction.response.defer()
+    await interaction.response.defer(ephemeral=True)
     
     try:
         prompt_idea = (
@@ -490,14 +490,20 @@ async def proposer_idee(interaction: discord.Interaction):
             "Propose une idée originale, concrète et utile d'ajout ou d'amélioration technique pour le réseau de serveurs. "
             "Structure ta réponse avec un Titre court et percutant, une Description claire du besoin, et les Bénéfices pour le staff."
         )
-        response = ai_client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt_idea
+
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: ai_client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=prompt_idea
+            )
         )
         idea_text = response.text
 
         central_guild = bot.get_guild(CENTRAL_GUILD_ID)
         suggest_channel = discord.utils.get(central_guild.text_channels, name="💡-suggestions-ia")
+        
         if suggest_channel:
             embed_suggest = discord.Embed(
                 title="💡 PROPOSITION D'AMÉLIORATION IA",
@@ -507,11 +513,13 @@ async def proposer_idee(interaction: discord.Interaction):
             )
             embed_suggest.set_footer(text="Proposition générée par Gemini AI • Cliquez sur un bouton ci-dessous")
             await suggest_channel.send(embed=embed_suggest, view=SuggestionView(idea_text))
-            await interaction.followup.send("✅ Une nouvelle proposition a été publiée dans `#💡-suggestions-ia` !")
+            await interaction.followup.send("✅ Une nouvelle proposition a été publiée avec succès dans `#💡-suggestions-ia` !")
         else:
-            await interaction.followup.send("❌ Salon `#💡-suggestions-ia` introuvable.")
+            await interaction.followup.send("❌ Salon `#💡-suggestions-ia` introuvable sur la centrale.")
+            
     except Exception as e:
-        await interaction.followup.send(f"❌ Erreur lors de la génération d'idée : {e}")
+        print(f"❌ Erreur lors de la génération de l'idée IA : {e}")
+        await interaction.followup.send(f"❌ Une erreur est survenue lors de l'appel à l'IA : `{e}`")
 
 @bot.tree.command(name="global-ban", description="Bannit un utilisateur de TOUS les serveurs du réseau avec notification MP.")
 @app_commands.describe(user_id="ID de l'utilisateur à bannir", raison="Raison du bannissement global")
@@ -865,7 +873,7 @@ async def on_member_remove(member):
 @bot.event
 async def on_guild_channel_create(channel):
     embed = discord.Embed(title="📂 Salon Créé", description=f"**#{channel.name}** créé.", color=discord.Color.blue())
-    await send_central_log(channel.guild.id, "salons", embed)
+    await send_central_log(member.guild.id if hasattr(channel, 'guild') else channel.guild.id, "salons", embed)
 
 @bot.event
 async def on_member_ban(guild, user):
